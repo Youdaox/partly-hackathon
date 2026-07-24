@@ -1,0 +1,1 @@
+{"completed": {"annotation": {"objects": [{"code": "01", "description": "Seat cushion heater", "bounding_box": {"top_left": {"x": 540, "y": 953}, "bottom_right": {"x": 590, "y": 984}}}, {"code": "02", "description": "Seat cushion heater", "bounding_box": {"top_left": {"x": 358, "y": 1160}, "bottom_right": {"x": 408, "y": 1191}}}]}}}

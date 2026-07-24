@@ -1,0 +1,9 @@
+services:
+  api:
+    build: ./api
+    ports:
+      - "8420:8420"
+    volumes:
+      - ./data:/data:ro
+    environment:
+      DATA_DIR: /data

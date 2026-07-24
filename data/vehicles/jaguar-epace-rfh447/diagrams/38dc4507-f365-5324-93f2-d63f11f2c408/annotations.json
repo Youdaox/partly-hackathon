@@ -1,0 +1,1 @@
+{"completed": {"annotation": {"objects": [{"code": "01", "description": "Instrument panel wiring harness", "bounding_box": {"top_left": {"x": 570, "y": 393}, "bottom_right": {"x": 620, "y": 423}}}, {"code": "02", "description": "Connecting wires", "bounding_box": {"top_left": {"x": 191, "y": 1241}, "bottom_right": {"x": 242, "y": 1271}}}]}}}

@@ -1,0 +1,1 @@
+{"completed": {"annotation": {"objects": [{"code": "01", "description": "engine - disassembly", "bounding_box": {"top_left": {"x": 817, "y": 666}, "bottom_right": {"x": 868, "y": 696}}}, {"code": "02", "description": "engine - Short cylinder body", "bounding_box": {"top_left": {"x": 787, "y": 1125}, "bottom_right": {"x": 837, "y": 1155}}}]}}}

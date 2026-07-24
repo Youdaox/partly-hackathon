@@ -1,0 +1,1 @@
+{"completed": {"annotation": {"objects": [{"code": "01", "description": "Intake camshaft", "bounding_box": {"top_left": {"x": 90, "y": 863}, "bottom_right": {"x": 141, "y": 893}}}, {"code": "02", "description": "Exhaust camshaft", "bounding_box": {"top_left": {"x": 620, "y": 474}, "bottom_right": {"x": 671, "y": 504}}}]}}}
