@@ -4,12 +4,12 @@
  * Optional — the API builds graphs in memory on demand. Run this if you want to
  * inspect the graph with SQL:
  *
- *   pnpm --filter @first-look/api seed
- *   pnpm --filter @first-look/api seed toyota-yaris-qmn16
+ *   pnpm --filter @partli/api seed
+ *   pnpm --filter @partli/api seed toyota-yaris-qmn16
  */
 
-import { CATALOGUE_VEHICLE_SLUGS } from '@first-look/shared';
-import { graphStats, proximityGraph, toEdgeRows } from '@first-look/shared/dataset';
+import { CATALOGUE_VEHICLE_SLUGS } from '@partli/shared';
+import { graphStats, proximityGraph, toEdgeRows } from '@partli/shared/dataset';
 
 import { getDb, migrate } from '../db/index.js';
 import { replaceProximityEdges } from '../repositories/proximity.js';

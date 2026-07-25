@@ -1,9 +1,9 @@
 /**
- * First Look domain types — the single source of truth shared by api, web and mobile.
+ * Partli domain types — the single source of truth shared by api, web and mobile.
  *
  * Everything here is a plain type with no runtime dependency, so it is safe to import
  * from React Native and the browser. Anything that touches the filesystem lives in
- * `@first-look/shared/dataset` instead.
+ * `@partli/shared/dataset` instead.
  */
 
 // ---------------------------------------------------------------------------

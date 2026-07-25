@@ -10,8 +10,8 @@ import {
   type ApprovalLineItem,
   type DamageItem,
   type HiddenDamagePrediction,
-} from '@first-look/shared';
-import { loadAssemblies } from '@first-look/shared/dataset';
+} from '@partli/shared';
+import { loadAssemblies } from '@partli/shared/dataset';
 
 export interface BuildLineItemsInput {
   vehicleSlug: string;

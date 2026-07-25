@@ -1,5 +1,5 @@
 {
-  "name": "first-look",
+  "name": "partli",
   "version": "0.1.0",
   "private": true,
   "packageManager": "pnpm@11.17.0",
@@ -7,15 +7,15 @@
     "node": ">=20"
   },
   "scripts": {
-    "dev": "turbo run dev --filter=@first-look/api --filter=@first-look/web",
-    "dev:shared": "pnpm --filter @first-look/shared dev",
-    "mobile": "pnpm --filter @first-look/mobile start",
+    "dev": "turbo run dev --filter=@partli/api --filter=@partli/web",
+    "dev:shared": "pnpm --filter @partli/shared dev",
+    "mobile": "pnpm --filter @partli/mobile start",
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
     "lint": "turbo run lint",
     "test": "turbo run test",
     "smoke": "node scripts/smoke.mjs",
-    "seed": "pnpm --filter @first-look/api seed",
+    "seed": "pnpm --filter @partli/api seed",
     "clean": "turbo run clean && rm -rf node_modules",
     "db:up": "docker compose up -d postgres",
     "db:down": "docker compose down",

@@ -1,18 +1,18 @@
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: first-look-db
+    container_name: partli-db
     restart: unless-stopped
     ports:
       - "5432:5432"
     environment:
-      POSTGRES_USER: firstlook
-      POSTGRES_PASSWORD: firstlook
-      POSTGRES_DB: firstlook
+      POSTGRES_USER: partli
+      POSTGRES_PASSWORD: partli
+      POSTGRES_DB: partli
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U firstlook -d firstlook"]
+      test: ["CMD-SHELL", "pg_isready -U partli -d partli"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -20,7 +20,7 @@ services:
   # Partly's read-only dataset API from the hackathon bundle (docs at :8420/docs).
   # The `api/` image source was NOT included in this repo, so this service is behind
   # a profile and will not start with a plain `docker compose up`. Drop the folder in
-  # and run `docker compose --profile dataset up` if you want it. Nothing in First Look
+  # and run `docker compose --profile dataset up` if you want it. Nothing in Partli
   # depends on it — apps/api reads `data/` straight off disk via packages/shared.
   dataset-api:
     profiles: ["dataset"]

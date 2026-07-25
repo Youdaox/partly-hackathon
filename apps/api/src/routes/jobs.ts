@@ -5,8 +5,8 @@
 
 import { Router } from 'express';
 import { z } from 'zod';
-import type { JobState, SendToCustomerResponse } from '@first-look/shared';
-import { hasCatalogue, loadVehicle, searchParts } from '@first-look/shared/dataset';
+import type { JobState, SendToCustomerResponse } from '@partli/shared';
+import { hasCatalogue, loadVehicle, searchParts } from '@partli/shared/dataset';
 
 import { config } from '../config.js';
 import { getDb } from '../db/index.js';

@@ -4,14 +4,14 @@
 
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import type { JobStatus } from '@first-look/shared';
+import type { JobStatus } from '@partli/shared';
 
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ApiError, api } from '@/lib/api';
 
 export const metadata: Metadata = {
-  title: 'Front desk — First Look',
+  title: 'Front desk — Partli',
 };
 
 // Always render fresh: jobs change while the page is open.

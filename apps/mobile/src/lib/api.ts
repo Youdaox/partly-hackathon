@@ -1,7 +1,7 @@
 /**
- * Typed client for the First Look API.
+ * Typed client for the Partli API.
  *
- * Types come from `@first-look/shared`, so a change to the API contract shows up
+ * Types come from `@partli/shared`, so a change to the API contract shows up
  * here as a compile error rather than a runtime surprise.
  */
 
@@ -15,7 +15,7 @@ import type {
   JobState,
   SendToCustomerResponse,
   VehicleSummary,
-} from '@first-look/shared';
+} from '@partli/shared';
 
 /**
  * Where the API lives.

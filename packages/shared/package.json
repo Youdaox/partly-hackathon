@@ -1,5 +1,5 @@
 {
-  "name": "@first-look/shared",
+  "name": "@partli/shared",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -20,7 +20,7 @@
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test dist/**/*.test.js",
+    "test": "node --test \"dist/**/*.test.js\"",
     "clean": "rm -rf dist .turbo"
   },
   "devDependencies": {

@@ -5,7 +5,7 @@
 
 import '@/global.css';
 
-import { Platform } from 'react-native';
+import { Platform, type TextStyle } from 'react-native';
 
 export const Colors = {
   light: {
@@ -75,3 +75,12 @@ export const Spacing = {
 
 export const BottomTabInset = Platform.select({ ios: 50, android: 80 }) ?? 0;
 export const MaxContentWidth = 800;
+
+/**
+ * Spread into a TextInput's style to kill the browser focus ring.
+ *
+ * React Native Web renders TextInput as an <input>, which the browser outlines in blue
+ * on focus — nothing React Native's own types describe, hence the cast. No-op on native.
+ */
+export const NoFocusRing =
+  Platform.OS === 'web' ? ({ outlineStyle: 'none' } as unknown as TextStyle) : null;

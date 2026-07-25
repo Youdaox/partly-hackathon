@@ -1,10 +1,10 @@
 {
-  "name": "@first-look/api",
+  "name": "@partli/api",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch --clear-screen=false --ignore \"**/.pglite/**\" --ignore \"**/node_modules/**\" src/index.ts",
+    "dev": "tsx watch --clear-screen=false --ignore \"**/.pglite/**\" --ignore \"**/node_modules/**\" --ignore \"../../node_modules/**\" src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.3.14",
-    "@first-look/shared": "workspace:*",
+    "@partli/shared": "workspace:*",
     "cors": "^2.8.5",
     "dotenv": "^17.2.5",
     "express": "^5.1.0",

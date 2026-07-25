@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 export default function Home() {
   return (
     <main className="mx-auto w-full max-w-lg px-4 py-16">
-      <p className="text-sm font-medium text-primary">First Look</p>
+      <p className="text-sm font-medium text-primary">Partli</p>
       <h1 className="mt-1 text-2xl font-semibold tracking-tight">
         Customer approvals &amp; front desk
       </h1>

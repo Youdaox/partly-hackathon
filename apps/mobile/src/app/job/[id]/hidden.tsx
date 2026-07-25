@@ -9,7 +9,7 @@
 import { useCallback, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import type { HiddenDamagePrediction, JobState } from '@first-look/shared';
+import type { HiddenDamagePrediction, JobState } from '@partli/shared';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';

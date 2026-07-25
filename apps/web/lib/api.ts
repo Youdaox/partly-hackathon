@@ -7,7 +7,7 @@
  * API never has to be publicly reachable.
  */
 
-import type { ApprovalPayload, Job, VehicleSummary } from '@first-look/shared';
+import type { ApprovalPayload, Job, VehicleSummary } from '@partli/shared';
 
 export const API_URL = (process.env.API_URL ?? 'http://localhost:4000').replace(/\/$/, '');
 

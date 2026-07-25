@@ -1,4 +1,4 @@
--- First Look — initial schema.
+-- Partli — initial schema.
 --
 -- Runs on both the docker-compose Postgres and the PGlite dev fallback, so keep to
 -- plain Postgres 16 SQL. Everything is IF NOT EXISTS: migrations run on every boot.
@@ -49,7 +49,7 @@ CREATE INDEX IF NOT EXISTS hidden_damage_job_idx ON hidden_damage_predictions (j
 
 -- Precomputed proximity edges, one row per directed edge, per vehicle.
 -- Optional: the API builds the graph in memory on demand. This exists so a slow
--- cold start can be traded for a seed step (`pnpm --filter @first-look/api seed`).
+-- cold start can be traded for a seed step (`pnpm --filter @partli/api seed`).
 CREATE TABLE IF NOT EXISTS proximity_graph_cache (
   vehicle_slug     TEXT NOT NULL,
   part_id          TEXT NOT NULL,

@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'First Look',
+  title: 'Partli',
   description: 'Automotive damage assessment — customer approvals and front-desk view.',
 };
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * End-to-end smoke test for the First Look API.
+ * End-to-end smoke test for the Partli API.
  *
  * Walks the entire demo path: create a job, add damage, run the oracle, confirm a
  * prediction, send to the customer, then approve as the customer.
@@ -45,7 +45,7 @@ function heading(title) {
 }
 
 async function main() {
-  console.log(`First Look smoke test against ${BASE}`);
+  console.log(`Partli smoke test against ${BASE}`);
 
   heading('health');
   const health = await call('GET', '/health');

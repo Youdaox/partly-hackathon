@@ -15,7 +15,7 @@ import {
   searchParts,
   diagramImageFile,
   hasPredictions,
-} from '@first-look/shared/dataset';
+} from '@partli/shared/dataset';
 
 import { badRequest, notFound } from '../http.js';
 

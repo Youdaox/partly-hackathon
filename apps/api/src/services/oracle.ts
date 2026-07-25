@@ -1,12 +1,12 @@
 /**
  * The hidden-damage oracle.
  *
- * Thin orchestration only: the graph maths lives in `@first-look/shared/dataset` so
+ * Thin orchestration only: the graph maths lives in `@partli/shared/dataset` so
  * it stays pure and testable. This module turns a job's visible damage into seeds,
  * runs the scoring, and hands back rows ready to persist.
  */
 
-import type { DamageItem, HiddenDamagePrediction } from '@first-look/shared';
+import type { DamageItem, HiddenDamagePrediction } from '@partli/shared';
 import {
   loadAssemblies,
   loadPredictions,
@@ -14,7 +14,7 @@ import {
   proximityGraph,
   scoreHiddenDamage,
   type DamageSeed,
-} from '@first-look/shared/dataset';
+} from '@partli/shared/dataset';
 import type { HiddenDamageInput } from '../repositories/jobs.js';
 
 /** Severity from the AI dataset -> how strongly that part should pull the scoring. */
