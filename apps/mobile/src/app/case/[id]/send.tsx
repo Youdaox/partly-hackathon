@@ -1,20 +1,25 @@
 /**
- * Screen 4 — send to customer.
+ * Send to customer.
  *
- * Builds the quote, then shows the shareable link as a QR code so the customer can
- * scan it off the repairer's phone and approve on their own device.
+ * One job: hand over a link. The QR is the whole point of the screen, so it gets the space,
+ * and everything else is a single line of summary underneath.
+ *
+ * This used to print every part with every supplier option — 22 parts times three offers,
+ * which is 66 rows the repairer has already reviewed on the previous screen and which the
+ * customer is about to see properly on their own page. The counts and the price range say
+ * the same thing in one line, and the parts are one tap away if they are wanted.
  */
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, Share, StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import QRCode from 'react-native-qrcode-svg';
-import { formatLeadTime, formatPrice } from '@partli/shared';
+import { formatPrice } from '@partli/shared';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Button, Card, ErrorNotice, Loading, Pill } from '@/components/ui';
-import { Spacing } from '@/constants/theme';
+import { Button, ErrorNotice, Loading } from '@/components/ui';
+import { Radius, Spacing } from '@/constants/theme';
 import { toErrorInfo, useAsyncData } from '@/hooks/use-async-data';
 import { useTheme } from '@/hooks/use-theme';
 import { backend } from '@/lib/backend';
@@ -29,6 +34,7 @@ export default function SendToCustomerScreen() {
 
   const [resending, setResending] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [showParts, setShowParts] = useState(false);
   const [actionError, setActionError] = useState<{ title: string; detail?: string } | null>(null);
 
   const resend = useCallback(async () => {
@@ -81,10 +87,7 @@ export default function SendToCustomerScreen() {
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
       } else {
-        await Share.share({
-          message: `Your repair options are ready: ${url}`,
-          url,
-        });
+        await Share.share({ message: `Your repair options are ready: ${url}`, url });
       }
     } catch (err) {
       // Dismissing the share sheet rejects with AbortError. Not worth reporting.
@@ -94,6 +97,25 @@ export default function SendToCustomerScreen() {
     } finally {
       busy.current = false;
     }
+  }, [quote.data]);
+
+  /**
+   * The price range the customer will actually be choosing between: cheapest offer per part
+   * against genuine-where-one-exists. Derived, so it can never claim a spread the quote does
+   * not contain.
+   */
+  const range = useMemo(() => {
+    const lines = quote.data?.lines ?? [];
+    let low = 0;
+    let high = 0;
+    for (const line of lines) {
+      if (line.options.length === 0) continue;
+      const prices = line.options.map((o) => o.price_nzd);
+      const genuine = line.options.filter((o) => o.tier === 'oem').map((o) => o.price_nzd);
+      low += Math.min(...prices) * line.qty;
+      high += (genuine.length ? Math.min(...genuine) : Math.max(...prices)) * line.qty;
+    }
+    return { low, high };
   }, [quote.data]);
 
   if (quote.loading) {
@@ -121,89 +143,93 @@ export default function SendToCustomerScreen() {
   const result = quote.data;
   const error = actionError ?? quote.error;
 
-  const total = result.lines.reduce((sum, item) => {
-    // Show the cheapest option per part, since that is what an unsure customer sees first.
-    if (item.options.length === 0) return sum;
-    const cheapest = Math.min(...item.options.map((option) => option.price_nzd));
-    return sum + cheapest * item.qty;
-  }, 0);
-
   return (
     <ThemedView style={styles.container}>
       <ScrollView contentContainerStyle={styles.list}>
         {error ? <ErrorNotice title={error.title} detail={error.detail} /> : null}
 
-        <Card style={styles.qrCard}>
-          <ThemedText type="smallBold">Have the customer scan this</ThemedText>
-          <View style={styles.qrWrapper}>
-            {/* QR renders on a white square so it scans reliably in dark mode. */}
-            <View style={styles.qrSurface}>
-              <QRCode value={result.approval_url} size={200} backgroundColor="#ffffff" />
-            </View>
-          </View>
-          <Pressable onPress={share} accessibilityRole="button">
-            <ThemedText type="small" style={{ color: theme.accent }}>
-              {result.approval_url}
-            </ThemedText>
-          </Pressable>
-          <Button
-            title={
-              Platform.OS === 'web' ? (copied ? 'Copied' : 'Copy link') : 'Share link'
-            }
-            variant={copied ? 'success' : 'secondary'}
-            onPress={share}
-            fullWidth
-          />
-        </Card>
+        <ThemedText type="heading" style={styles.heading}>
+          Ready to send
+        </ThemedText>
+        <ThemedText type="small" themeColor="textSecondary" style={styles.sub}>
+          Have the customer scan this with their phone camera.
+        </ThemedText>
 
-        <View style={styles.sectionHeader}>
-          <ThemedText type="smallBold">Quote</ThemedText>
-          <Pill label={`${result.lines.length} parts`} tone="accent" />
+        {/* The QR gets the room. Always on white so it scans off a dim screen. */}
+        <View style={styles.qrWrap}>
+          <View style={styles.qrSurface}>
+            <QRCode value={result.approval_url} size={220} backgroundColor="#ffffff" />
+          </View>
         </View>
 
-        {result.lines.map((item) => (
-          <Card key={item.part_id} style={styles.card}>
-            <View style={styles.itemHeader}>
-              <ThemedText type="smallBold" style={styles.itemName}>
-                {item.qty > 1 ? `${item.qty}\u00d7 ` : ''}
-                {item.display_name}
-              </ThemedText>
-              {item.kind === 'hidden' ? <Pill label="Predicted" tone="success" /> : null}
-            </View>
-            {item.options.map((option) => (
-              <View key={option.id} style={styles.optionRow}>
-                <ThemedText type="small" themeColor="textSecondary">
-                  {option.label}
-                </ThemedText>
-                <ThemedText type="small">
-                  {formatPrice(option.price_nzd)} · {formatLeadTime(option.lead_days)}
-                  {option.in_stock ? '' : ' · backorder'}
-                </ThemedText>
-              </View>
-            ))}
-          </Card>
-        ))}
-
-        <Card>
-          <View style={styles.optionRow}>
-            <ThemedText type="smallBold">Cheapest total</ThemedText>
-            <ThemedText type="smallBold">{formatPrice(total)}</ThemedText>
-          </View>
-          <ThemedText type="small" themeColor="textSecondary">
-            Simulated pricing — the dataset ships no price, stock or supplier data.
+        <Pressable onPress={share} accessibilityRole="button" style={styles.linkWrap}>
+          <ThemedText type="small" style={[styles.link, { color: theme.accent }]} numberOfLines={1}>
+            {result.approval_url}
           </ThemedText>
-        </Card>
+        </Pressable>
 
         <Button
-          title="Rebuild quote"
-          variant="secondary"
-          onPress={resend}
-          loading={resending}
+          title={Platform.OS === 'web' ? (copied ? 'Copied' : 'Copy link') : 'Share link'}
+          variant={copied ? 'success' : 'secondary'}
+          onPress={share}
           fullWidth
         />
 
-        {/* Rebuilding stays on this screen — this is the way back to the assessment. */}
-        <Button title="Back to the assessment" onPress={() => router.back()} fullWidth />
+        {/* One line instead of 66 rows. */}
+        <View style={[styles.summary, { borderTopColor: theme.border, borderBottomColor: theme.border }]}>
+          <View style={styles.summaryRow}>
+            <ThemedText type="rowTitle">{result.lines.length} parts</ThemedText>
+            <ThemedText type="rowTitle">
+              {formatPrice(range.low)}
+              {range.high > range.low ? ` – ${formatPrice(range.high)}` : ''}
+            </ThemedText>
+          </View>
+          <ThemedText type="small" themeColor="textSecondary">
+            The customer picks from three plans: best price, our recommendation, or all
+            genuine parts.
+          </ThemedText>
+        </View>
+
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => setShowParts((open) => !open)}
+          style={({ pressed }) => [styles.disclosure, { opacity: pressed ? 0.6 : 1 }]}
+        >
+          <ThemedText type="smallBold" style={{ color: theme.accent }}>
+            {showParts ? 'Hide the parts' : 'See the parts'}
+          </ThemedText>
+        </Pressable>
+
+        {showParts
+          ? result.lines.map((item) => (
+              <View key={item.part_id} style={[styles.partRow, { borderBottomColor: theme.border }]}>
+                <ThemedText type="small" style={styles.partName} numberOfLines={2}>
+                  {item.qty > 1 ? `${item.qty}× ` : ''}
+                  {item.display_name}
+                </ThemedText>
+                <ThemedText type="small" themeColor="textSecondary">
+                  {item.options.length
+                    ? formatPrice(Math.min(...item.options.map((o) => o.price_nzd)) * item.qty)
+                    : '—'}
+                </ThemedText>
+              </View>
+            ))
+          : null}
+
+        <View style={styles.actions}>
+          <Button title="Back to the assessment" onPress={() => router.back()} fullWidth />
+          <Button
+            title="Rebuild quote"
+            variant="secondary"
+            onPress={resend}
+            loading={resending}
+            fullWidth
+          />
+        </View>
+
+        <ThemedText type="small" themeColor="textSecondary" style={styles.footnote}>
+          Simulated pricing — the dataset ships no price, stock or supplier data.
+        </ThemedText>
       </ScrollView>
     </ThemedView>
   );
@@ -213,18 +239,43 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   padded: { padding: Spacing.three },
   retry: { marginTop: Spacing.three },
-  list: { padding: Spacing.three, gap: Spacing.three, paddingBottom: Spacing.five },
-  qrCard: { alignItems: 'center', gap: Spacing.three },
-  qrWrapper: { alignItems: 'center' },
-  qrSurface: { backgroundColor: '#ffffff', padding: Spacing.three, borderRadius: Spacing.two },
-  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
-  card: { gap: Spacing.one },
-  itemHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
-  itemName: { flex: 1 },
-  optionRow: {
+  list: {
+    padding: Spacing.three,
+    gap: Spacing.three,
+    paddingBottom: Spacing.five,
+    maxWidth: 520,
+    width: '100%',
+    alignSelf: 'center',
+  },
+
+  heading: { textAlign: 'center' },
+  sub: { textAlign: 'center', marginTop: -Spacing.two },
+
+  qrWrap: { alignItems: 'center', paddingVertical: Spacing.two },
+  qrSurface: { backgroundColor: '#ffffff', padding: Spacing.three, borderRadius: Radius.card },
+
+  linkWrap: { alignItems: 'center' },
+  link: { textAlign: 'center' },
+
+  summary: {
+    gap: Spacing.one,
+    paddingVertical: Spacing.three,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  summaryRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' },
+
+  disclosure: { alignSelf: 'center', minHeight: 30, justifyContent: 'center' },
+  partRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: Spacing.two,
+    paddingVertical: Spacing.two,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
+  partName: { flex: 1 },
+
+  actions: { gap: Spacing.two, marginTop: Spacing.two },
+  footnote: { textAlign: 'center' },
 });
