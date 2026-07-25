@@ -5,9 +5,9 @@
  * scan it off the repairer's phone and approve on their own device.
  */
 
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, Share, StyleSheet, View } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import QRCode from 'react-native-qrcode-svg';
 import { formatLeadTime, formatPrice } from '@partli/shared';
 
@@ -21,12 +21,14 @@ import { backend } from '@/lib/backend';
 
 export default function SendToCustomerScreen() {
   const { id: caseId } = useLocalSearchParams<{ id: string }>();
+  const router = useRouter();
   const theme = useTheme();
 
   // Sending on mount is the point of this screen — there is nothing to configure.
   const quote = useAsyncData(() => backend.sendToCustomer(caseId), [caseId]);
 
   const [resending, setResending] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [actionError, setActionError] = useState<{ title: string; detail?: string } | null>(null);
 
   const resend = useCallback(async () => {
@@ -41,12 +43,57 @@ export default function SendToCustomerScreen() {
     }
   }, [caseId, quote]);
 
+  /**
+   * Hand the link over.
+   *
+   * Web and native need different things. `navigator.share` needs a secure context, throws
+   * if an earlier share is still open, and rejects when the sheet is dismissed — so on web
+   * this copies instead, which is what the button has always said it does.
+   *
+   * `navigator.clipboard` is itself unavailable over plain http on a LAN address, so there
+   * is an execCommand fallback for exactly the case this demo runs in.
+   */
+  const busy = useRef(false);
+
   const share = useCallback(async () => {
-    if (!quote.data) return;
-    await Share.share({
-      message: `Your repair options are ready: ${quote.data.approval_url}`,
-      url: quote.data.approval_url,
-    });
+    const url = quote.data?.approval_url;
+    // The guard is the fix for "an earlier share has not yet completed": the link and the
+    // button both call this, and a double tap used to start a second share.
+    if (!url || busy.current) return;
+    busy.current = true;
+    setActionError(null);
+
+    try {
+      if (Platform.OS === 'web') {
+        if (navigator?.clipboard?.writeText) {
+          await navigator.clipboard.writeText(url);
+        } else {
+          // Non-secure context: no Clipboard API. A throwaway textarea still works.
+          const field = document.createElement('textarea');
+          field.value = url;
+          field.style.position = 'fixed';
+          field.style.opacity = '0';
+          document.body.appendChild(field);
+          field.select();
+          document.execCommand('copy');
+          document.body.removeChild(field);
+        }
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } else {
+        await Share.share({
+          message: `Your repair options are ready: ${url}`,
+          url,
+        });
+      }
+    } catch (err) {
+      // Dismissing the share sheet rejects with AbortError. Not worth reporting.
+      if (!(err instanceof Error) || err.name !== 'AbortError') {
+        setActionError(toErrorInfo(err));
+      }
+    } finally {
+      busy.current = false;
+    }
   }, [quote.data]);
 
   if (quote.loading) {
@@ -100,8 +147,10 @@ export default function SendToCustomerScreen() {
             </ThemedText>
           </Pressable>
           <Button
-            title={Platform.OS === 'web' ? 'Copy link' : 'Share link'}
-            variant="secondary"
+            title={
+              Platform.OS === 'web' ? (copied ? 'Copied' : 'Copy link') : 'Share link'
+            }
+            variant={copied ? 'success' : 'secondary'}
             onPress={share}
             fullWidth
           />
@@ -152,6 +201,9 @@ export default function SendToCustomerScreen() {
           loading={resending}
           fullWidth
         />
+
+        {/* Rebuilding stays on this screen — this is the way back to the assessment. */}
+        <Button title="Back to the assessment" onPress={() => router.back()} fullWidth />
       </ScrollView>
     </ThemedView>
   );

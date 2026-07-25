@@ -1,22 +1,32 @@
 /**
- * The whole assessment, on one screen.
+ * The whole assessment, on one screen, as a chat thread.
  *
- * Modelled on the ChatGPT mobile app: a centred greeting above a composer that starts as a
- * pill and grows as you type. Submitting does **not** navigate — the greeting drops away,
- * the report renders in its place, and the composer settles to the bottom as the follow-up
- * input. Same route, same mounted component, so there is no push animation and no back
- * button between describing the car and reading the answer.
+ * Modelled on the ChatGPT mobile app, and the details that make it feel that way:
  *
- * `/case/[id]` still exists for the drawer's deep links; it renders the same view.
+ *  - the composer is pinned to the bottom and **never moves**. On a fresh screen the
+ *    greeting sits above it; it does not start centred and then jump;
+ *  - sending appends the repairer's words as a bubble in the thread. It does not navigate,
+ *    and there is no back button between describing the car and reading the answer;
+ *  - the assistant's answer is unstyled content in the flow, not a bubble — same as the
+ *    reference. Only the repairer's own messages get a filled bubble;
+ *  - one live answer, always last: confirming a part re-runs the whole prediction, so the
+ *    answer updates in place rather than leaving stale copies in the history.
  */
 
-import { useCallback, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useCallback, useRef, useState } from 'react';
+import {
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View,
+} from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 
-import { CaseReportView } from '@/components/case-report';
+import { CaseReportView, MessageBubble } from '@/components/case-report';
 import { Composer } from '@/components/composer';
 import { RecentDrawer } from '@/components/recent-drawer';
 import { ThemedText } from '@/components/themed-text';
@@ -38,6 +48,7 @@ export default function HomeScreen() {
   const router = useRouter();
   const theme = useTheme();
   const voice = useVoiceCapture();
+  const scroller = useRef<ScrollView>(null);
 
   // Loaded in the background — the composer renders immediately either way.
   const vehicles = useAsyncData(async () => (await backend.listVehicles()).vehicles);
@@ -48,13 +59,15 @@ export default function HomeScreen() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
 
+  /** The repairer's side of the conversation, oldest first. */
+  const [thread, setThread] = useState<string[]>([]);
+
   /**
    * Captures taken before a case exists.
    *
-   * `/audio/transcribe` and `/media/upload` both require a `case_id`, and a case needs a
-   * resolved vehicle, which needs a rego — so a clip recorded on the home screen cannot be
-   * sent yet. It is held here and uploaded the moment the case is created, which is what
-   * lets the mic and the `+` work on the home screen at all.
+   * `/audio/transcribe` and `/media/upload` both need a `case_id`, and a case needs a
+   * resolved vehicle, which needs a rego — so a clip recorded here cannot be sent yet. It is
+   * held and uploaded the moment the case is created.
    */
   const [pendingAudio, setPendingAudio] = useState<Recording | null>(null);
   const [pendingMedia, setPendingMedia] = useState<{
@@ -63,89 +76,81 @@ export default function HomeScreen() {
   } | null>(null);
 
   /**
-   * The live case. Null until the first submit — that is what switches the layout.
-   *
-   * `caseId` is null for the first second or two: the view flips as soon as the vehicle is
-   * registered, so the status pill can report Track A while the catalogue loads. The case
-   * itself cannot be created until then, because `POST /case` rejects an unresolved vehicle.
+   * The live case. `caseId` stays null for the first second or two: the thread starts as soon
+   * as the vehicle is registered so progress is visible, but `POST /case` rejects an
+   * unresolved vehicle.
    */
   const [active, setActive] = useState<{
     caseId: string | null;
     vehicleId: string;
-    said?: string;
   } | null>(null);
 
   const kase = useCase(active?.caseId ?? null, active?.vehicleId ?? null);
-
   const startable = (vehicles.data ?? []).filter((v) => v.has_catalogue);
 
-  const begin = useCallback(async (match: RegoMatch) => {
-    setStarting(true);
-    setStartError(null);
+  const scrollToEnd = useCallback(() => {
+    requestAnimationFrame(() => scroller.current?.scrollToEnd({ animated: true }));
+  }, []);
 
-    const said = match.remainder.trim();
+  const begin = useCallback(
+    async (match: RegoMatch, said: string) => {
+      setStarting(true);
+      setStartError(null);
 
-    try {
-      // Track A: rego → VIN → catalogue. Returns at once with status "resolving".
-      const vehicle = await backend.registerVehicle(match.rego);
+      try {
+        // Track A: rego → VIN → catalogue. Returns at once with status "resolving".
+        const vehicle = await backend.registerVehicle(match.rego);
+        setActive({ caseId: null, vehicleId: vehicle.vehicle_id });
 
-      // Flip the layout now, not after the catalogue lands — this is the whole point of
-      // the parallel track. No navigation: the hero becomes the report in place.
-      setActive({ caseId: null, vehicleId: vehicle.vehicle_id, said: said || undefined });
-      setDraft('');
+        const ready =
+          vehicle.status === 'resolving' ? await waitForVehicleReady(vehicle.vehicle_id) : vehicle;
 
-      // `POST /case` 409s on an unresolved vehicle, so the wait is mandatory.
-      const ready =
-        vehicle.status === 'resolving'
-          ? await waitForVehicleReady(vehicle.vehicle_id)
-          : vehicle;
+        if (ready.status === 'not_found') {
+          setStartError({
+            title: `${match.rego} could not be resolved`,
+            detail: 'The registration did not match a vehicle.',
+          });
+          return;
+        }
+        if (ready.status === 'resolving') {
+          setStartError({
+            title: 'The catalogue is taking longer than expected',
+            detail: 'Reopen the case from the menu once it has loaded.',
+          });
+          return;
+        }
 
-      if (ready.status === 'not_found') {
-        setStartError({
-          title: `${match.rego} could not be resolved`,
-          detail: 'The registration did not match a vehicle.',
+        const created = await backend.createCase(ready.vehicle_id);
+        if (said) await backend.sendMessage(created.case_id, said);
+
+        rememberCase({
+          caseId: created.case_id,
+          vehicleId: ready.vehicle_id,
+          label: `${match.vehicle.make} ${match.vehicle.model} · ${match.rego}`,
+          said: said || undefined,
         });
-        return;
+
+        setActive({ caseId: created.case_id, vehicleId: ready.vehicle_id });
+
+        // Anything captured before the case existed goes up now, in the order it was taken.
+        if (pendingAudio) {
+          await kase.transcribeInto(created.case_id, pendingAudio.uri, pendingAudio.mimeType);
+          setPendingAudio(null);
+        }
+        if (pendingMedia) {
+          await kase.attachInto(created.case_id, pendingMedia.kind, pendingMedia.files);
+          setPendingMedia(null);
+        }
+      } catch (err) {
+        setStartError(toErrorInfo(err));
+      } finally {
+        setStarting(false);
       }
-      if (ready.status === 'resolving') {
-        setStartError({
-          title: 'The catalogue is taking longer than expected',
-          detail: 'Pull the case up again from the menu once it has loaded.',
-        });
-        return;
-      }
-
-      const created = await backend.createCase(ready.vehicle_id);
-
-      // Track B: the repairer's own words are the first evidence on the case.
-      if (said) await backend.sendMessage(created.case_id, said);
-
-      rememberCase({
-        caseId: created.case_id,
-        vehicleId: ready.vehicle_id,
-        label: `${match.vehicle.make} ${match.vehicle.model} · ${match.rego}`,
-        said: said || undefined,
-      });
-
-      setActive((prev) => (prev ? { ...prev, caseId: created.case_id } : prev));
-
-      // Anything captured before the case existed goes up now, in the order it was taken.
-      if (pendingAudio) {
-        await kase.transcribeInto(created.case_id, pendingAudio.uri, pendingAudio.mimeType);
-        setPendingAudio(null);
-      }
-      if (pendingMedia) {
-        await kase.attachInto(created.case_id, pendingMedia.kind, pendingMedia.files);
-        setPendingMedia(null);
-      }
-    } catch (err) {
-      setStartError(toErrorInfo(err));
-    } finally {
-      setStarting(false);
-    }
-    // The pending captures must be in here: an empty array would close over their initial
-    // nulls and silently drop a clip recorded before submit.
-  }, [pendingAudio, pendingMedia, kase]);
+      // The pending captures must be here: an empty array would close over their initial
+      // nulls and silently drop a clip recorded before submit.
+    },
+    [pendingAudio, pendingMedia, kase],
+  );
 
   /** Submitting means "start a case" before there is one, and "follow up" after. */
   const submit = useCallback(() => {
@@ -153,8 +158,10 @@ export default function HomeScreen() {
     if (!text || starting) return;
 
     if (active) {
-      void kase.ask(text);
+      setThread((prev) => [...prev, text]);
       setDraft('');
+      scrollToEnd();
+      void kase.ask(text);
       return;
     }
 
@@ -177,16 +184,12 @@ export default function HomeScreen() {
       return;
     }
 
-    void begin(match);
-  }, [draft, starting, active, kase, vehicles.loading, vehicles.data, startable, begin]);
+    // The bubble shows what was actually typed, vehicle name and all.
+    setThread([text]);
+    setDraft('');
+    void begin(match, match.remainder.trim());
+  }, [draft, starting, active, kase, vehicles.loading, vehicles.data, startable, begin, scrollToEnd]);
 
-  /**
-   * Voice goes to the backend, not to the text box: `POST /v1/audio/transcribe` stores the
-   * clip, runs ASR and turns the transcript into evidence.
-   *
-   * With a case open it uploads straight away. Without one it is held, because the endpoint
-   * needs a `case_id` — `begin` sends it as soon as the case exists.
-   */
   const toggleRecording = useCallback(async () => {
     if (voice.isRecording) {
       const clip = await voice.stop();
@@ -198,10 +201,6 @@ export default function HomeScreen() {
     }
   }, [voice, active, kase]);
 
-  /**
-   * Photos or a walkaround video. The backend pulls keyframes from video and runs vision
-   * over them, so the result lands as evidence the same way speech does.
-   */
   const pickMedia = useCallback(async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
@@ -215,7 +214,6 @@ export default function HomeScreen() {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images', 'videos'],
       allowsMultipleSelection: true,
-      // The backend caps a request at 10 files.
       selectionLimit: 10,
       videoMaxDuration: 120,
     });
@@ -235,12 +233,15 @@ export default function HomeScreen() {
     else setPendingMedia({ kind, files });
   }, [active, kase]);
 
-  /** Back to a blank prompt without leaving the screen. */
+  /** Back to a blank thread without leaving the screen. */
   const reset = useCallback(() => {
     setActive(null);
+    setThread([]);
     setDraft('');
     setStartError(null);
     setExpanded(null);
+    setPendingAudio(null);
+    setPendingMedia(null);
   }, []);
 
   const showVehicles = useCallback(() => {
@@ -254,6 +255,13 @@ export default function HomeScreen() {
     });
   }, [startable]);
 
+  /**
+   * One composer, placed in one of two spots.
+   *
+   * Centred with the greeting on a fresh screen — pinning it to the bottom there left a
+   * screen-high void above it, which looked worse than the jump it was meant to avoid. Once
+   * a conversation exists it docks at the bottom and stays put.
+   */
   const composer = (
     <Composer
       value={draft}
@@ -274,7 +282,40 @@ export default function HomeScreen() {
     />
   );
 
-  const title = kase.vehicle
+  /** Captures held until a case exists. Sits next to whichever composer is on screen. */
+  const pendingChips =
+    pendingAudio || pendingMedia ? (
+      <View style={styles.pendingRow}>
+        {pendingAudio ? (
+          <View style={[styles.pendingChip, { borderColor: theme.accent }]}>
+            <Ionicons name="mic" size={13} color={theme.accent} />
+            <ThemedText type="small" style={{ color: theme.accent }}>
+              Voice note ready
+            </ThemedText>
+          </View>
+        ) : null}
+        {pendingMedia ? (
+          <View style={[styles.pendingChip, { borderColor: theme.accent }]}>
+            <Ionicons
+              name={pendingMedia.kind === 'video' ? 'videocam' : 'image'}
+              size={13}
+              color={theme.accent}
+            />
+            <ThemedText type="small" style={{ color: theme.accent }}>
+              {pendingMedia.files.length} {pendingMedia.kind === 'video' ? 'video' : 'photo'}
+              {pendingMedia.files.length === 1 ? '' : 's'}
+            </ThemedText>
+          </View>
+        ) : null}
+        {!active ? (
+          <ThemedText type="small" themeColor="textSecondary">
+            Name the vehicle to send
+          </ThemedText>
+        ) : null}
+      </View>
+    ) : null;
+
+  const title = active && kase.vehicle
     ? [kase.vehicle.year, kase.vehicle.make, kase.vehicle.model].filter(Boolean).join(' ') ||
       kase.vehicle.rego
     : 'Partli';
@@ -283,7 +324,7 @@ export default function HomeScreen() {
     <>
       <Stack.Screen
         options={{
-          title: active ? title : 'Partli',
+          title,
           headerTitleAlign: 'center',
           headerLeft: () => (
             <Pressable
@@ -317,68 +358,45 @@ export default function HomeScreen() {
         keyboardVerticalOffset={90}
       >
         <ThemedView style={styles.container}>
-          {active ? (
-            // --- Report state: results fill the screen, composer pins to the bottom.
-            <CaseReportView
-              report={kase.report}
-              // No case yet means Track A is still running, not that anything failed.
-              loading={kase.loading || !active.caseId}
-              vehicle={kase.vehicle}
-              error={kase.error ?? startError}
-              // The latest transcript wins, so the echo reflects what was just heard.
-              said={kase.transcript ?? active.said}
-              busyId={kase.busyId}
-              answering={kase.answering}
-              expanded={expanded}
-              onToggleExpanded={setExpanded}
-              onConfirm={kase.confirm}
-              onAnswer={kase.answer}
-            />
-          ) : (
-            // --- Hero state: centred greeting, composer, starters.
-            <ScrollView
-              contentContainerStyle={styles.heroScroll}
-              keyboardShouldPersistTaps="handled"
-              showsVerticalScrollIndicator={false}
-            >
+          <ScrollView
+            ref={scroller}
+            contentContainerStyle={[styles.scroll, !active && styles.scrollEmpty]}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            onContentSizeChange={active ? scrollToEnd : undefined}
+          >
+            {active ? (
+              <View style={styles.thread}>
+                {thread.map((text, i) => (
+                  <MessageBubble key={`${i}-${text.slice(0, 12)}`} text={text} />
+                ))}
+
+                {/* The transcript comes back as the repairer's words too. */}
+                {kase.transcript ? <MessageBubble text={kase.transcript} /> : null}
+
+                <CaseReportView
+                  report={kase.report}
+                  // No case yet means Track A is still running, not that anything failed.
+                  loading={kase.loading || !active.caseId}
+                  vehicle={kase.vehicle}
+                  error={kase.error ?? startError}
+                  busyId={kase.busyId}
+                  answering={kase.answering}
+                  expanded={expanded}
+                  onToggleExpanded={setExpanded}
+                  onConfirm={kase.confirm}
+                  onAnswer={kase.answer}
+                />
+              </View>
+            ) : (
+              // Fresh screen: greeting, composer and starters as one centred block.
               <View style={styles.hero}>
                 <ThemedText type="heading" style={styles.heading}>
                   What&apos;s going on with the car?
                 </ThemedText>
 
                 {composer}
-
-                {/* Held captures. Without this a recording made here looks like it vanished,
-                    since it cannot be sent until the vehicle is known. */}
-                {pendingAudio || pendingMedia ? (
-                  <View style={styles.pendingRow}>
-                    {pendingAudio ? (
-                      <View style={[styles.pendingChip, { borderColor: theme.accent }]}>
-                        <Ionicons name="mic" size={14} color={theme.accent} />
-                        <ThemedText type="small" style={{ color: theme.accent }}>
-                          Voice note ready
-                        </ThemedText>
-                      </View>
-                    ) : null}
-                    {pendingMedia ? (
-                      <View style={[styles.pendingChip, { borderColor: theme.accent }]}>
-                        <Ionicons
-                          name={pendingMedia.kind === 'video' ? 'videocam' : 'image'}
-                          size={14}
-                          color={theme.accent}
-                        />
-                        <ThemedText type="small" style={{ color: theme.accent }}>
-                          {pendingMedia.files.length}{' '}
-                          {pendingMedia.kind === 'video' ? 'video' : 'photo'}
-                          {pendingMedia.files.length === 1 ? '' : 's'} ready
-                        </ThemedText>
-                      </View>
-                    ) : null}
-                    <ThemedText type="small" themeColor="textSecondary">
-                      Name the vehicle to send
-                    </ThemedText>
-                  </View>
-                ) : null}
+                {pendingChips}
 
                 <View style={styles.suggestions}>
                   <SuggestionRow
@@ -386,8 +404,6 @@ export default function HomeScreen() {
                     label="Try an example walkaround"
                     onPress={() => setDraft(EXAMPLE)}
                   />
-                  {/* Voice lives in the docked composer, because the transcribe endpoint
-                      needs a case to attach the clip to. */}
                   <SuggestionRow
                     icon="keypad-outline"
                     label="Start from a rego"
@@ -413,39 +429,40 @@ export default function HomeScreen() {
                   </View>
                 ) : null}
               </View>
-            </ScrollView>
-          )}
+            )}
+          </ScrollView>
 
-          {/* In the report state the composer is docked; in the hero state it sits inline
-              above, so it must not be rendered twice. */}
+          {/* Docked only once there is a conversation to sit under. */}
           {active ? (
             <View style={[styles.dock, { borderTopColor: theme.border }]}>
+              {pendingChips}
               {composer}
-              <View style={styles.dockLinks}>
-                <Pressable
-                  accessibilityRole="button"
-                  disabled={!active.caseId}
-                  onPress={() => router.push(`/case/${active.caseId}/inspection`)}
-                  style={({ pressed }) => [styles.dockLink, { opacity: pressed ? 0.6 : 1 }]}
-                >
-                  <Ionicons name="cube-outline" size={16} color={theme.accent} />
-                  <ThemedText type="smallBold" style={{ color: theme.accent }}>
-                    3D inspection
-                  </ThemedText>
-                </Pressable>
 
-                <Pressable
-                  accessibilityRole="button"
-                  disabled={!active.caseId}
-                  onPress={() => router.push(`/case/${active.caseId}/send`)}
-                  style={({ pressed }) => [styles.dockLink, { opacity: pressed ? 0.6 : 1 }]}
-                >
-                  <ThemedText type="smallBold" style={{ color: theme.accent }}>
-                    Send to customer
-                  </ThemedText>
-                  <Ionicons name="chevron-forward" size={15} color={theme.accent} />
-                </Pressable>
-              </View>
+              {active.caseId ? (
+                <View style={styles.dockLinks}>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => router.push(`/case/${active.caseId}/inspection`)}
+                    style={({ pressed }) => [styles.dockLink, { opacity: pressed ? 0.6 : 1 }]}
+                  >
+                    <Ionicons name="cube-outline" size={15} color={theme.accent} />
+                    <ThemedText type="smallBold" style={{ color: theme.accent }}>
+                      3D inspection
+                    </ThemedText>
+                  </Pressable>
+
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => router.push(`/case/${active.caseId}/send`)}
+                    style={({ pressed }) => [styles.dockLink, { opacity: pressed ? 0.6 : 1 }]}
+                  >
+                    <ThemedText type="smallBold" style={{ color: theme.accent }}>
+                      Send to customer
+                    </ThemedText>
+                    <Ionicons name="chevron-forward" size={15} color={theme.accent} />
+                  </Pressable>
+                </View>
+              ) : null}
             </View>
           ) : null}
         </ThemedView>
@@ -459,18 +476,26 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
 
-  heroScroll: { flexGrow: 1, justifyContent: 'center', padding: Spacing.three },
+  scroll: { padding: Spacing.three, paddingBottom: Spacing.four },
+  // A fresh screen centres the whole block; the composer is part of it, not docked.
+  scrollEmpty: { flexGrow: 1, justifyContent: 'center' },
   hero: { width: '100%', maxWidth: 720, alignSelf: 'center' },
   heading: { textAlign: 'center', marginBottom: Spacing.four },
   suggestions: { marginTop: Spacing.four },
 
-  pendingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
+  thread: { width: '100%', maxWidth: 720, alignSelf: 'center', gap: Spacing.three },
+
+  headerButton: { paddingHorizontal: Spacing.two },
+
+  dock: {
+    padding: Spacing.three,
     gap: Spacing.two,
-    marginTop: Spacing.three,
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
+  dockLinks: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  dockLink: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one, minHeight: 30 },
+
+  pendingRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: Spacing.two },
   pendingChip: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -481,16 +506,6 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.half,
   },
 
-  headerButton: { paddingHorizontal: Spacing.two },
-
-  dock: {
-    padding: Spacing.three,
-    gap: Spacing.two,
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
-  dockLinks: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  dockLink: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one, minHeight: 32 },
-
-  error: { marginTop: Spacing.three, alignItems: 'center', gap: Spacing.half },
+  error: { marginTop: Spacing.two, alignItems: 'center', gap: Spacing.half },
   errorDetail: { textAlign: 'center' },
 });

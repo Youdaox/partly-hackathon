@@ -27,7 +27,15 @@ class Settings(BaseSettings):
 
     # Where the approval page is served from. Must be reachable from the
     # customer's phone, not just from this machine.
-    web_base_url: str = "http://localhost:3000"
+    #
+    # Left empty on purpose: the approval URL is then built from the host the request
+    # arrived on, so a phone that reached the backend at 10.20.0.63:8080 gets a link to
+    # 10.20.0.63:3000 rather than to localhost, which on a phone means the phone itself.
+    # Set PARTLI_WEB_BASE_URL to override (a tunnel, a deployed URL).
+    web_base_url: str = ""
+
+    # Port the Next app listens on, used when deriving the approval URL.
+    web_port: int = 3000
 
     @property
     def vehicles_dir(self) -> Path:

@@ -119,7 +119,7 @@ export default async function ApprovePage({
       {approved ? null : (
         <>
           <h2 className="mb-3 text-sm font-medium text-muted-foreground">
-            Pick a supplier for each part, or tell us to leave it
+            Choose how you&apos;d like it repaired
           </h2>
           <QuoteForm token={token} lines={lines} />
         </>

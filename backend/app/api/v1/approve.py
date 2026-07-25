@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import secrets
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
 from app.api.deps import require_case
 from app.api.errors import ApiError
@@ -27,8 +27,23 @@ from app.store.cases import Case
 router = APIRouter(tags=["approve"])
 
 
+def approval_base_url(request: Request) -> str:
+    """Where the customer's approval page lives.
+
+    An explicit setting always wins. Otherwise it is derived from the host this request
+    arrived on: the repairer's phone reached the backend over the LAN, so the same address
+    with the web port is reachable from the customer's phone too. Hardcoding localhost
+    produced a QR code that pointed the customer's phone at itself.
+    """
+    if settings.web_base_url:
+        return settings.web_base_url.rstrip("/")
+
+    host = request.url.hostname or "localhost"
+    return f"{request.url.scheme}://{host}:{settings.web_port}"
+
+
 @router.post("/case/{case_id}/send-to-customer")
-async def send_to_customer(case: Case = Depends(require_case)) -> dict:
+async def send_to_customer(request: Request, case: Case = Depends(require_case)) -> dict:
     vehicle = cases.get_vehicle(case.vehicle_id)
     catalogue = registry.get(vehicle.slug) if vehicle and vehicle.slug else None
     if catalogue is None:
@@ -59,7 +74,7 @@ async def send_to_customer(case: Case = Depends(require_case)) -> dict:
     return {
         "case_id": case.id,
         "token": token,
-        "approval_url": f"{settings.web_base_url}/approve/{token}",
+        "approval_url": f"{approval_base_url(request)}/approve/{token}",
         "lines": lines,
         "simulated": True,
     }

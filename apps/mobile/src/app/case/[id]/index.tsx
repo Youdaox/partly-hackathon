@@ -8,11 +8,18 @@
  */
 
 import { useCallback, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View,
+} from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
-import { CaseReportView } from '@/components/case-report';
+import { CaseReportView, MessageBubble } from '@/components/case-report';
 import { Composer } from '@/components/composer';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -78,19 +85,22 @@ export default function CaseScreen() {
         keyboardVerticalOffset={90}
       >
         <ThemedView style={styles.container}>
-          <CaseReportView
-            report={kase.report}
-            loading={kase.loading}
-            vehicle={kase.vehicle}
-            error={kase.error}
-            said={said}
-            busyId={kase.busyId}
-            answering={kase.answering}
-            expanded={expanded}
-            onToggleExpanded={setExpanded}
-            onConfirm={kase.confirm}
-            onAnswer={kase.answer}
-          />
+          {/* The report renders as a plain View now, so the scroll lives here. */}
+          <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+            {said ? <MessageBubble text={said} /> : null}
+            <CaseReportView
+              report={kase.report}
+              loading={kase.loading}
+              vehicle={kase.vehicle}
+              error={kase.error}
+              busyId={kase.busyId}
+              answering={kase.answering}
+              expanded={expanded}
+              onToggleExpanded={setExpanded}
+              onConfirm={kase.confirm}
+              onAnswer={kase.answer}
+            />
+          </ScrollView>
 
           <View style={[styles.dock, { borderTopColor: theme.border }]}>
             <Composer
@@ -119,6 +129,7 @@ export default function CaseScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  scroll: { padding: Spacing.three, gap: Spacing.three },
   headerTitle: { alignItems: 'center' },
   headerButton: { paddingHorizontal: Spacing.two },
   dock: { padding: Spacing.three, gap: Spacing.two, borderTopWidth: StyleSheet.hairlineWidth },

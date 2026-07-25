@@ -1,28 +1,21 @@
 /**
- * The diagnosis itself: everything the prediction backend returns for a case.
+ * The assistant's answer: everything the prediction backend returns for a case.
  *
- * Rendered inline on the entry screen and by the `/case/[id]` deep link, so there is one
- * implementation. Scrolls; the composer sits below it and is the caller's business.
+ * Renders as a plain `View`, not a scroll container — it lives inside the chat thread on the
+ * home screen, so the thread owns scrolling. Wrapping it in its own ScrollView would nest
+ * two of them and break the thread.
  *
- * There is deliberately no vehicle silhouette here. The impact zone is stated in words on
- * the status line instead — a drawing of a car that cannot show left from right on a side
- * profile was decoration, and it pushed the actual parts list below the fold.
+ * Styling is deliberately flat: no card borders or fills, just type weight and hairline
+ * dividers, the way a message list reads. The only filled surface in the whole thread is the
+ * repairer's own message bubble.
  */
 
-import { Fragment } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Fragment, useState } from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { Framed } from '@/components/framed';
 import { ThemedText } from '@/components/themed-text';
-import {
-  EmptyState,
-  ErrorNotice,
-  Loading,
-  MatchBadge,
-  NumberBadge,
-  SectionLabel,
-} from '@/components/ui';
+import { EmptyState, ErrorNotice, Loading, MatchBadge, SectionLabel } from '@/components/ui';
 import { Radius, Spacing, TapTarget } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import type { ErrorInfo } from '@/hooks/use-case';
@@ -54,10 +47,10 @@ function vehicleStatusLine(vehicle: VehiclePayload | null): string {
       return `Looking up ${vehicle.rego}…`;
     case 'catalogue_ready': {
       const name = [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(' ');
-      return `${name} · ${vehicle.parts_indexed?.toLocaleString()} parts ready`;
+      return `${name} · ${vehicle.parts_indexed?.toLocaleString()} parts`;
     }
     case 'no_catalogue':
-      return `${vehicle.rego} has no parts catalogue — claims stay class-level`;
+      return `${vehicle.rego} has no parts catalogue`;
     case 'not_found':
       return `${vehicle.rego} not found`;
     default:
@@ -73,12 +66,77 @@ function impactLine(report: CaseReport): string | null {
   return `${report.impact.zone}${side ? `, ${side}` : ''}${severity}`;
 }
 
+// ---------------------------------------------------------------------------
+
+/** The repairer's own message, right-aligned. The one filled surface in the thread. */
+export function MessageBubble({ text }: { text: string }) {
+  const theme = useTheme();
+  return (
+    <View style={styles.bubbleRow}>
+      <View style={[styles.bubble, { backgroundColor: theme.backgroundSelected }]}>
+        <ThemedText>{text}</ThemedText>
+      </View>
+    </View>
+  );
+}
+
+type SectionKey = 'visible' | 'order' | 'check';
+
+const SECTIONS: { key: SectionKey; title: string }[] = [
+  { key: 'visible', title: 'Visible damage' },
+  { key: 'order', title: 'Hidden damage — order now' },
+  { key: 'check', title: 'Parts to check if damaged' },
+];
+
+/**
+ * A collapsed section header: a tappable row, not a box.
+ *
+ * The count is the summary, so all three groups are legible at a glance with none of the
+ * rows on screen.
+ */
+function SectionBar({
+  title,
+  count,
+  open,
+  onPress,
+}: {
+  title: string;
+  count: number;
+  open: boolean;
+  onPress: () => void;
+}) {
+  const theme = useTheme();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ expanded: open }}
+      accessibilityLabel={`${title}, ${count}`}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.sectionBar,
+        { borderBottomColor: theme.border, opacity: pressed ? 0.6 : 1 },
+      ]}
+    >
+      <ThemedText type="rowTitle" style={styles.grow}>
+        {title}
+      </ThemedText>
+      <ThemedText type="smallBold" style={{ color: theme.textSecondary }}>
+        {count}
+      </ThemedText>
+      <Ionicons
+        name={open ? 'chevron-down' : 'chevron-forward'}
+        size={16}
+        color={theme.textSecondary}
+      />
+    </Pressable>
+  );
+}
+
 export interface CaseReportViewProps {
   report: CaseReport | null;
   loading: boolean;
   vehicle: VehiclePayload | null;
   error: ErrorInfo | null;
-  said?: string;
   busyId: string | null;
   answering: string | null;
   /** Which check row has its attribution open. */
@@ -86,8 +144,6 @@ export interface CaseReportViewProps {
   onToggleExpanded: (partId: string | null) => void;
   onConfirm: (partId: string, damaged: boolean) => void;
   onAnswer: (questionId: string, value: string) => void;
-  /** Rendered under the last section, e.g. a Send-to-customer button. */
-  footer?: React.ReactNode;
 }
 
 export function CaseReportView({
@@ -95,81 +151,71 @@ export function CaseReportView({
   loading,
   vehicle,
   error,
-  said,
   busyId,
   answering,
   expanded,
   onToggleExpanded,
   onConfirm,
   onAnswer,
-  footer,
 }: CaseReportViewProps) {
   const theme = useTheme();
 
+  /**
+   * Which section is expanded. `check` on arrival: it is the only one that asks the repairer
+   * for anything, and the other two are summarised by their counts until wanted.
+   */
+  const [openSection, setOpenSection] = useState<SectionKey | null>('check');
+  const toggleSection = (key: SectionKey) =>
+    setOpenSection((current) => (current === key ? null : key));
+
   const resolving = vehicle?.status === 'resolving';
 
-  /**
-   * The pill reports Track A and must be visible *before* there is a report — watching the
-   * catalogue load is the point of it, so it cannot sit behind a spinner.
-   */
-  const statusPill = (
-    <View style={[styles.statusPill, { backgroundColor: theme.badgeFill }]}>
-      <Ionicons
-        name={resolving ? 'ellipsis-horizontal-circle-outline' : 'checkmark-circle'}
-        size={16}
-        color={theme.badgeText}
-      />
-      <ThemedText type="small" style={[styles.statusText, { color: theme.badgeText }]}>
+  /** Track A, as one quiet line. Visible before the report exists — that is the point. */
+  const status = (
+    <View style={styles.statusRow}>
+      {resolving ? (
+        <Ionicons name="ellipsis-horizontal" size={14} color={theme.textSecondary} />
+      ) : null}
+      <ThemedText type="small" themeColor="textSecondary">
         {vehicleStatusLine(vehicle)}
       </ThemedText>
-      {vehicle?.resolved_ms ? (
-        <ThemedText type="small" themeColor="textSecondary">
-          {vehicle.resolved_ms} ms
-        </ThemedText>
-      ) : null}
     </View>
   );
 
   if (!report) {
     return (
       <View style={styles.pending}>
-        {statusPill}
+        {status}
         {loading ? (
-          <Loading label={resolving ? 'Loading the catalogue…' : 'Running the prediction…'} />
+          <Loading label={resolving ? 'Loading the catalogue…' : 'Working it out…'} />
         ) : (
           <ErrorNotice title={error?.title ?? 'No prediction yet'} detail={error?.detail} />
         )}
-        {loading && error ? <ErrorNotice title={error.title} detail={error.detail} /> : null}
       </View>
     );
   }
+
   const impact = impactLine(report);
 
-  /** A line in the see/order sections: no confirm, no attribution. */
-  const plainLine = (line: ReportLine, index: number) => (
-    <View
-      key={line.part_id}
-      style={[styles.card, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}
-    >
+  /**
+   * A row in the visible/hidden groups.
+   *
+   * The part number shows only on the order group — that group *is* the shopping list, so
+   * the number is the point of it. On a part you are standing in front of it was 24
+   * characters of noise.
+   */
+  const plainRow = (line: ReportLine, showPartNumber: boolean) => (
+    <View key={line.part_id} style={[styles.row, { borderBottomColor: theme.border }]}>
       <View style={styles.rowHead}>
-        <NumberBadge n={index + 1} muted />
-        <ThemedText type="rowTitle" style={styles.rowName}>
+        <ThemedText type="rowTitle" style={styles.grow} numberOfLines={2}>
           {line.name}
+          {line.qty > 1 ? (
+            <ThemedText type="smallBold" style={{ color: theme.textSecondary }}>
+              {'  '}×{line.qty}
+            </ThemedText>
+          ) : null}
         </ThemedText>
         <MatchBadge value={line.p} />
-      </View>
-
-      <View style={styles.metaRow}>
-        {line.part_number ? (
-          <ThemedText type="small" themeColor="textSecondary" style={styles.partNumber}>
-            {line.part_number}
-          </ThemedText>
-        ) : null}
-        {line.qty > 1 ? (
-          <ThemedText type="smallBold" style={{ color: theme.badgeText }}>
-            ×{line.qty}
-          </ThemedText>
-        ) : null}
       </View>
 
       {line.reason ? (
@@ -177,29 +223,165 @@ export function CaseReportView({
           {line.reason}
         </ThemedText>
       ) : null}
+
+      {showPartNumber && line.part_number ? (
+        <ThemedText type="small" themeColor="textSecondary" style={styles.partNumber}>
+          {line.part_number}
+        </ThemedText>
+      ) : null}
     </View>
   );
 
-  return (
-    <ScrollView contentContainerStyle={styles.list} keyboardShouldPersistTaps="handled">
-      {/* Track A progress. Never blocks anything below it. */}
-      {statusPill}
+  const rowsFor = (key: SectionKey) => {
+    if (key === 'visible') {
+      return report.sections.visible.length === 0 ? (
+        <EmptyState message="Nothing recorded as visible yet." />
+      ) : (
+        report.sections.visible.map((line) => plainRow(line, false))
+      );
+    }
+    if (key === 'order') {
+      return report.sections.order.length === 0 ? (
+        <EmptyState message="Nothing else implied yet." />
+      ) : (
+        report.sections.order.map((line) => plainRow(line, true))
+      );
+    }
 
-      {impact ? (
-        <ThemedText type="small" themeColor="textSecondary" style={styles.impact}>
-          Impact: {impact}
-        </ThemedText>
-      ) : null}
-
-      {said ? (
-        <View style={styles.saidBlock}>
-          <View style={[styles.saidChip, { borderColor: theme.accent }]}>
-            <ThemedText type="small" style={{ color: theme.accent }}>
-              You said
+    return report.sections.check.map((line) => {
+      const open = expanded === line.part_id;
+      return (
+        <View key={line.part_id} style={[styles.row, { borderBottomColor: theme.border }]}>
+          <View style={styles.rowHead}>
+            <ThemedText type="rowTitle" style={styles.grow} numberOfLines={2}>
+              {line.name}
+              {line.qty > 1 ? (
+                <ThemedText type="smallBold" style={{ color: theme.textSecondary }}>
+                  {'  '}×{line.qty}
+                </ThemedText>
+              ) : null}
             </ThemedText>
+            <MatchBadge value={line.p} />
           </View>
-          <ThemedText>{said}</ThemedText>
+
+          {line.reason ? (
+            <ThemedText type="small" themeColor="textSecondary">
+              {line.reason}
+            </ThemedText>
+          ) : null}
+
+          {line.accessible === false ? (
+            <ThemedText type="small" style={{ color: theme.warning }}>
+              needs teardown to see
+            </ThemedText>
+          ) : null}
+
+          {/* Attribution: the exact decomposition behind the number. */}
+          {line.attribution?.length ? (
+            <Fragment>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => onToggleExpanded(open ? null : line.part_id)}
+                style={({ pressed }) => [styles.whyToggle, { opacity: pressed ? 0.6 : 1 }]}
+              >
+                <ThemedText type="smallBold" style={{ color: theme.accent }}>
+                  {open ? 'Hide why' : 'Why'}
+                </ThemedText>
+                <Ionicons
+                  name={open ? 'chevron-up' : 'chevron-down'}
+                  size={14}
+                  color={theme.accent}
+                />
+              </Pressable>
+
+              {open ? (
+                <View style={styles.attribution}>
+                  {line.attribution.map((cause, i) => (
+                    <View key={`${line.part_id}-${i}`} style={styles.causeRow}>
+                      <ThemedText type="small" style={styles.grow} numberOfLines={2}>
+                        {cause.cause}
+                      </ThemedText>
+                      <ThemedText type="small" themeColor="textSecondary">
+                        {cause.relation.replace(/_/g, ' ')}
+                      </ThemedText>
+                      <ThemedText type="smallBold" style={{ color: theme.textSecondary }}>
+                        {Math.round(cause.share * 100)}%
+                      </ThemedText>
+                    </View>
+                  ))}
+                  {line.part_number ? (
+                    <ThemedText type="small" themeColor="textSecondary" style={styles.partNumber}>
+                      {line.part_number}
+                    </ThemedText>
+                  ) : null}
+                </View>
+              ) : null}
+            </Fragment>
+          ) : null}
+
+          {/* ✓ / ✗ are the only interaction: two taps, greasy hands. */}
+          {line.confirmed == null ? (
+            <View style={styles.answerRow}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Confirm ${line.name} is damaged`}
+                disabled={busyId === line.part_id}
+                onPress={() => onConfirm(line.part_id, true)}
+                style={({ pressed }) => [
+                  styles.answerButton,
+                  { borderColor: theme.success, opacity: pressed ? 0.6 : 1 },
+                ]}
+              >
+                <Ionicons name="checkmark" size={18} color={theme.success} />
+                <ThemedText type="smallBold" style={{ color: theme.success }}>
+                  Damaged
+                </ThemedText>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Rule out ${line.name}`}
+                disabled={busyId === line.part_id}
+                onPress={() => onConfirm(line.part_id, false)}
+                style={({ pressed }) => [
+                  styles.answerButton,
+                  { borderColor: theme.border, opacity: pressed ? 0.6 : 1 },
+                ]}
+              >
+                <Ionicons name="close" size={18} color={theme.textSecondary} />
+                <ThemedText type="smallBold" themeColor="textSecondary">
+                  Not damaged
+                </ThemedText>
+              </Pressable>
+            </View>
+          ) : (
+            <View style={styles.reviewedRow}>
+              <Ionicons
+                name={line.confirmed ? 'checkmark-circle' : 'close-circle-outline'}
+                size={16}
+                color={line.confirmed ? theme.success : theme.textSecondary}
+              />
+              <ThemedText
+                type="small"
+                style={{ color: line.confirmed ? theme.success : theme.textSecondary }}
+              >
+                {line.confirmed ? 'Confirmed damaged' : 'Ruled out'}
+              </ThemedText>
+            </View>
+          )}
         </View>
+      );
+    });
+  };
+
+  const countFor = (key: SectionKey) => report.sections[key].length;
+
+  return (
+    <View style={styles.answer}>
+      {status}
+      {impact ? (
+        <ThemedText type="small" themeColor="textSecondary">
+          {impact}
+        </ThemedText>
       ) : null}
 
       {error ? <ErrorNotice title={error.title} detail={error.detail} /> : null}
@@ -211,9 +393,9 @@ export function CaseReportView({
         />
       ) : null}
 
-      {/* --- The one clarifying question ------------------------------------- */}
+      {/* The one clarifying question. Left rule rather than a box. */}
       {report.question ? (
-        <Framed style={[styles.questionCard, { borderColor: theme.accent }]}>
+        <View style={[styles.question, { borderLeftColor: theme.accent }]}>
           <SectionLabel>ONE QUESTION</SectionLabel>
           <ThemedText type="rowTitle">{report.question.text}</ThemedText>
           <View style={styles.chips}>
@@ -238,257 +420,85 @@ export function CaseReportView({
               </Pressable>
             ))}
           </View>
-          <ThemedText type="small" themeColor="textSecondary">
-            Asked because answering moves the report more than anything else
-            {` (${report.question.value.toFixed(1)})`}.
-          </ThemedText>
-        </Framed>
+        </View>
       ) : null}
 
-      {/* --- ✓ You can see these -------------------------------------------- */}
-      <View style={styles.sectionHead}>
-        <ThemedText type="section">You can see these</ThemedText>
-        <ThemedText type="small" themeColor="textSecondary">
-          {report.sections.visible.length} parts
-        </ThemedText>
-      </View>
-      {report.sections.visible.length === 0 ? (
-        <EmptyState message="Nothing recorded as visible yet." />
-      ) : (
-        report.sections.visible.map(plainLine)
-      )}
-
-      {/* --- + You'll also need these --------------------------------------- */}
-      <View style={styles.sectionHead}>
-        <ThemedText type="section">You&apos;ll also need these</ThemedText>
-        <ThemedText type="small" themeColor="textSecondary">
-          {report.sections.order.length} parts
-        </ThemedText>
-      </View>
-      {report.sections.order.length === 0 ? (
-        <EmptyState message="Nothing else implied yet." />
-      ) : (
-        report.sections.order.map(plainLine)
-      )}
-
-      {/* --- ? Check these when it comes apart ------------------------------- */}
-      <View style={styles.sectionHead}>
-        <ThemedText type="section">Check these when it&apos;s off</ThemedText>
-        <ThemedText type="small" themeColor="textSecondary">
-          {report.sections.check.length} to look at
-        </ThemedText>
+      <View style={styles.sections}>
+        {SECTIONS.map(({ key, title }) => (
+          <Fragment key={key}>
+            <SectionBar
+              title={title}
+              count={countFor(key)}
+              open={openSection === key}
+              onPress={() => toggleSection(key)}
+            />
+            {openSection === key ? rowsFor(key) : null}
+          </Fragment>
+        ))}
       </View>
 
-      {report.sections.check.map((line) => {
-        const open = expanded === line.part_id;
-        return (
-          <View
-            key={line.part_id}
-            style={[
-              styles.card,
-              { backgroundColor: theme.backgroundElement, borderColor: theme.border },
-            ]}
-          >
-            <View style={styles.rowHead}>
-              {line.inspection_rank != null ? <NumberBadge n={line.inspection_rank} /> : null}
-              <ThemedText type="rowTitle" style={styles.rowName}>
-                {line.name}
-              </ThemedText>
-              <MatchBadge value={line.p} />
-            </View>
-
-            <View style={styles.metaRow}>
-              {line.part_number ? (
-                <ThemedText type="small" themeColor="textSecondary" style={styles.partNumber}>
-                  {line.part_number}
-                </ThemedText>
-              ) : null}
-              {line.qty > 1 ? (
-                <ThemedText type="smallBold" style={{ color: theme.badgeText }}>
-                  ×{line.qty}
-                </ThemedText>
-              ) : null}
-              {line.accessible === false ? (
-                <ThemedText type="small" style={{ color: theme.warning }}>
-                  needs teardown
-                </ThemedText>
-              ) : null}
-            </View>
-
-            {line.reason ? (
-              <ThemedText type="small" themeColor="textSecondary">
-                {line.reason}
-              </ThemedText>
-            ) : null}
-
-            {/* Attribution: the exact decomposition behind the number. */}
-            {line.attribution?.length ? (
-              <Fragment>
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={() => onToggleExpanded(open ? null : line.part_id)}
-                  style={({ pressed }) => [styles.whyToggle, { opacity: pressed ? 0.6 : 1 }]}
-                >
-                  <Ionicons
-                    name={open ? 'chevron-up' : 'chevron-down'}
-                    size={15}
-                    color={theme.accent}
-                  />
-                  <ThemedText type="smallBold" style={{ color: theme.accent }}>
-                    {open ? 'Hide why' : 'Why'}
-                  </ThemedText>
-                </Pressable>
-
-                {open ? (
-                  <View style={styles.attribution}>
-                    {line.attribution.map((cause, i) => (
-                      <View key={`${line.part_id}-${i}`} style={styles.causeRow}>
-                        <ThemedText type="small" style={styles.causeName} numberOfLines={2}>
-                          {cause.cause}
-                        </ThemedText>
-                        <ThemedText type="small" themeColor="textSecondary">
-                          {cause.relation.replace(/_/g, ' ')}
-                        </ThemedText>
-                        <ThemedText type="smallBold" style={{ color: theme.badgeText }}>
-                          {Math.round(cause.share * 100)}%
-                        </ThemedText>
-                      </View>
-                    ))}
-                  </View>
-                ) : null}
-              </Fragment>
-            ) : null}
-
-            {/* ✓ / ✗ are the only interaction: two taps, greasy hands. */}
-            {line.confirmed == null ? (
-              <View style={styles.answerRow}>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`Confirm ${line.name} is damaged`}
-                  disabled={busyId === line.part_id}
-                  onPress={() => onConfirm(line.part_id, true)}
-                  style={({ pressed }) => [
-                    styles.answerButton,
-                    { borderColor: theme.success, opacity: pressed ? 0.6 : 1 },
-                  ]}
-                >
-                  <Ionicons name="checkmark" size={20} color={theme.success} />
-                  <ThemedText type="smallBold" style={{ color: theme.success }}>
-                    Damaged
-                  </ThemedText>
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`Rule out ${line.name}`}
-                  disabled={busyId === line.part_id}
-                  onPress={() => onConfirm(line.part_id, false)}
-                  style={({ pressed }) => [
-                    styles.answerButton,
-                    { borderColor: theme.border, opacity: pressed ? 0.6 : 1 },
-                  ]}
-                >
-                  <Ionicons name="close" size={20} color={theme.textSecondary} />
-                  <ThemedText type="smallBold" themeColor="textSecondary">
-                    Not damaged
-                  </ThemedText>
-                </Pressable>
-              </View>
-            ) : (
-              <View style={styles.reviewedRow}>
-                <Ionicons
-                  name={line.confirmed ? 'checkmark-circle' : 'close-circle-outline'}
-                  size={18}
-                  color={line.confirmed ? theme.success : theme.textSecondary}
-                />
-                <ThemedText
-                  type="small"
-                  style={{ color: line.confirmed ? theme.success : theme.textSecondary }}
-                >
-                  {line.confirmed ? 'Confirmed damaged' : 'Ruled out'}
-                </ThemedText>
-              </View>
-            )}
-          </View>
-        );
-      })}
-
-      {/* What the engine actually did, so the numbers are not a black box. */}
-      {report.hidden_count != null ? (
-        <ThemedText type="small" themeColor="textSecondary" style={styles.footnote}>
-          {report.hidden_count.toLocaleString()} hidden parts scored from{' '}
-          {report.candidates?.toLocaleString()} candidates in {report.computed_ms} ms.
-        </ThemedText>
-      ) : null}
-
-      {footer}
-    </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  pending: { padding: Spacing.three, gap: Spacing.three },
-  // Tighter than the old crop-marked layout: cards carry their own edges, so they need
-  // less air between them. Section headings buy the separation back with padding.
-  list: { padding: Spacing.three, gap: Spacing.three, paddingBottom: Spacing.five },
+  answer: { gap: Spacing.two },
+  pending: { gap: Spacing.three, paddingVertical: Spacing.three },
+  grow: { flex: 1 },
 
-  statusPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two,
-    borderRadius: Radius.round,
+  bubbleRow: { alignItems: 'flex-end' },
+  bubble: {
+    maxWidth: '85%',
+    borderRadius: Radius.card + 4,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two,
   },
-  statusText: { flex: 1, fontWeight: '600' },
-  impact: { marginTop: -Spacing.three },
 
-  saidBlock: { gap: Spacing.two },
-  saidChip: {
-    alignSelf: 'flex-start',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: Radius.chip,
-    paddingHorizontal: Spacing.two,
-    paddingVertical: Spacing.half,
+  statusRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one },
+
+  question: {
+    gap: Spacing.two,
+    borderLeftWidth: 2,
+    paddingLeft: Spacing.three,
+    paddingVertical: Spacing.one,
+    marginVertical: Spacing.two,
   },
-
-  questionCard: { gap: Spacing.two, borderLeftWidth: 2, paddingLeft: Spacing.three },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two, marginTop: Spacing.one },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
   chip: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: Radius.chip,
     paddingHorizontal: Spacing.three,
-    minHeight: 44,
+    minHeight: 40,
     alignItems: 'center',
     justifyContent: 'center',
   },
 
-  sectionHead: {
+  sections: { marginTop: Spacing.two },
+  sectionBar: {
     flexDirection: 'row',
-    alignItems: 'baseline',
-    justifyContent: 'space-between',
+    alignItems: 'center',
     gap: Spacing.two,
-    paddingTop: Spacing.three,
+    minHeight: TapTarget - 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
 
-  /**
-   * A part row is a solid card, not a crop-marked frame: the sections stack a dozen of
-   * these and the registration ticks read as clutter at that density.
-   */
-  card: {
-    gap: Spacing.two,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: Radius.card - 4,
-    padding: Spacing.three,
+  row: {
+    gap: Spacing.one,
+    paddingVertical: Spacing.three,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   rowHead: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
-  rowName: { flex: 1 },
-  metaRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two, flexWrap: 'wrap' },
   partNumber: { fontSize: 12 },
 
-  whyToggle: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one, minHeight: 32 },
-  attribution: { gap: Spacing.one },
+  whyToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one,
+    minHeight: 30,
+    alignSelf: 'flex-start',
+  },
+  attribution: { gap: Spacing.one, paddingBottom: Spacing.one },
   causeRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
-  causeName: { flex: 1 },
 
   answerRow: { flexDirection: 'row', gap: Spacing.two, marginTop: Spacing.one },
   answerButton: {
@@ -497,11 +507,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: Spacing.one,
-    minHeight: TapTarget - 8,
+    minHeight: 44,
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: Radius.prompt,
+    borderRadius: Radius.chip,
   },
-  reviewedRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two, minHeight: 32 },
-
-  footnote: { textAlign: 'center' },
+  reviewedRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two, minHeight: 30 },
 });
