@@ -411,13 +411,46 @@ export function CaseReportView({
    * Observed damage. Compact, muted, no number — Partly saw it, so it is a
    * fact and the row's job is just to name it.
    */
+  /**
+   * One observed part.
+   *
+   * Carries a remove control because the camera is not always right — a scuff the
+   * interpreter read as a damaged panel has to be dismissable, or the quote goes out with a
+   * part the customer does not need. Removing is `confirm(part, damaged: false)`: the engine
+   * clamps it to zero and drops it from the report entirely, which is exactly the semantics
+   * of "I looked, it is fine".
+   */
   const visibleLine = (line: ReportLine) => (
-    <View key={line.part_id} style={[styles.seenRow, { borderColor: theme.border }]}>
-      <Ionicons name="checkmark" size={15} color={theme.textSecondary} />
-      <ThemedText type="small" style={styles.rowName} numberOfLines={2}>
-        {line.name}
-        {line.qty > 1 ? ` ×${line.qty}` : ''}
-      </ThemedText>
+    <View
+      key={line.part_id}
+      style={[styles.seenCard, { borderColor: theme.border, backgroundColor: theme.backgroundElement }]}
+    >
+      <View style={styles.seenBody}>
+        <ThemedText type="rowTitle" numberOfLines={2}>
+          {line.name}
+          {line.qty > 1 ? (
+            <ThemedText type="smallBold" style={{ color: theme.textSecondary }}>
+              {'  '}×{line.qty}
+            </ThemedText>
+          ) : null}
+        </ThemedText>
+        {line.part_number ? (
+          <ThemedText type="small" themeColor="textSecondary" style={styles.seenPartNumber}>
+            {line.part_number}
+          </ThemedText>
+        ) : null}
+      </View>
+
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Remove ${line.name} — not actually damaged`}
+        disabled={busyId === line.part_id}
+        onPress={() => onConfirm(line.part_id, false)}
+        hitSlop={8}
+        style={({ pressed }) => [styles.seenRemove, { opacity: pressed ? 0.5 : 1 }]}
+      >
+        <Ionicons name="close" size={18} color={theme.textSecondary} />
+      </Pressable>
     </View>
   );
 
@@ -495,14 +528,12 @@ export function CaseReportView({
         </ThemedText>
       </View>
       <ThemedText type="small" themeColor="textSecondary" style={styles.sectionIntro}>
-        What the camera saw. Already confirmed — nothing to decide here.
+        What the camera saw. Remove anything that is not actually damaged.
       </ThemedText>
       {report.sections.visible.length === 0 ? (
         <EmptyState message="Nothing recorded as visible yet." />
       ) : (
-        <View style={[styles.seenGroup, { borderColor: theme.border }]}>
-          {report.sections.visible.map(visibleLine)}
-        </View>
+        <View style={styles.seenGroup}>{report.sections.visible.map(visibleLine)}</View>
       )}
 
       {/* --- Hidden damage: the hero -------------------------------------- */}
@@ -678,19 +709,27 @@ const styles = StyleSheet.create({
   // A one-line "what this block is and what to do", under each heading.
   sectionIntro: { marginTop: -Spacing.two },
 
-  // Observed damage: one bordered group of quiet rows rather than N cards, so
-  // it reads as a settled list and cannot be confused with the hero block.
-  seenGroup: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: Radius.chip,
-    paddingHorizontal: Spacing.three,
-  },
-  seenRow: {
+  // Observed damage reads as cards, matching the plan cards on the customer's page:
+  // a bordered, rounded block with the name doing the work and one control on the right.
+  seenGroup: { gap: Spacing.two },
+  seenCard: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two,
-    paddingVertical: Spacing.two,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.card - 4,
+    paddingVertical: Spacing.three,
+    paddingLeft: Spacing.three,
+    paddingRight: Spacing.two,
+  },
+  seenBody: { flex: 1, gap: 2 },
+  seenPartNumber: { fontSize: 12 },
+  seenRemove: {
+    width: 34,
+    height: 34,
+    borderRadius: Radius.round,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   // Predicted damage: a heavier card with an accent edge. The weight is the

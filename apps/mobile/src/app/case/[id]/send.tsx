@@ -1,13 +1,17 @@
 /**
  * Send to customer.
  *
- * One job: hand over a link. The QR is the whole point of the screen, so it gets the space,
- * and everything else is a single line of summary underneath.
+ * One job: get the approval link to the customer. Email is the way in — a customer is
+ * usually not standing at the counter — with copy/share underneath for when they are.
  *
- * This used to print every part with every supplier option — 22 parts times three offers,
- * which is 66 rows the repairer has already reviewed on the previous screen and which the
- * customer is about to see properly on their own page. The counts and the price range say
- * the same thing in one line, and the parts are one tap away if they are wanted.
+ * There was a QR code here. It only ever served someone holding the repairer's phone, and
+ * it carried a real trap: the URL is built from whatever host the request arrived on, so a
+ * QR generated in a desktop browser encodes `localhost` and cannot be scanned by anything.
+ * A typed address has none of that.
+ *
+ * It also used to print every part with every supplier option — 22 parts times three
+ * offers, which is 66 rows the repairer already reviewed and the customer is about to see
+ * properly. The counts and the price range say the same thing in one line.
  */
 
 import { useCallback, useMemo, useRef, useState } from 'react';
@@ -23,7 +27,6 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import QRCode from 'react-native-qrcode-svg';
 import { formatPrice } from '@partli/shared';
 
 import { ThemedText } from '@/components/themed-text';
@@ -200,33 +203,14 @@ export default function SendToCustomerScreen() {
         {error ? <ErrorNotice title={error.title} detail={error.detail} /> : null}
 
         <ThemedText type="heading" style={styles.heading}>
-          Ready to send
+          Send to the customer
         </ThemedText>
         <ThemedText type="small" themeColor="textSecondary" style={styles.sub}>
-          Have the customer scan this with their phone camera.
+          Email them the link and they can approve from their own phone.
         </ThemedText>
 
-        {/* The QR gets the room. Always on white so it scans off a dim screen. */}
-        <View style={styles.qrWrap}>
-          <View style={styles.qrSurface}>
-            <QRCode value={result.approval_url} size={220} backgroundColor="#ffffff" />
-          </View>
-        </View>
-
-        <Pressable onPress={share} accessibilityRole="button" style={styles.linkWrap}>
-          <ThemedText type="small" style={[styles.link, { color: theme.accent }]} numberOfLines={1}>
-            {result.approval_url}
-          </ThemedText>
-        </Pressable>
-
-        <Button
-          title={Platform.OS === 'web' ? (copied ? 'Copied' : 'Copy link') : 'Share link'}
-          variant={copied ? 'success' : 'secondary'}
-          onPress={share}
-          fullWidth
-        />
-
-        {/* Email it instead, for a customer who is not standing at the counter. */}
+        {/* Email is the whole screen now. The QR only ever helped a customer standing at
+            the counter, and the link works everywhere. */}
         <View style={styles.emailRow}>
           <TextInput
             value={email}
@@ -241,7 +225,11 @@ export default function SendToCustomerScreen() {
             returnKeyType="send"
             style={[
               styles.emailInput,
-              { color: theme.text, borderColor: theme.border, backgroundColor: theme.backgroundElement },
+              {
+                color: theme.text,
+                borderColor: theme.border,
+                backgroundColor: theme.backgroundElement,
+              },
               NoFocusRing,
             ]}
           />
@@ -259,15 +247,29 @@ export default function SendToCustomerScreen() {
             ]}
           >
             <Ionicons
-              name="mail-outline"
+              name="arrow-forward"
               size={20}
               color={email.trim() ? theme.accentText : theme.textSecondary}
             />
           </Pressable>
         </View>
         <ThemedText type="small" themeColor="textSecondary" style={styles.emailNote}>
-          Opens your mail app with the link written, so it comes from the shop&apos;s address.
+          Opens your mail app with the message written, so it comes from the shop&apos;s
+          address.
         </ThemedText>
+
+        <Pressable onPress={share} accessibilityRole="button" style={styles.linkWrap}>
+          <ThemedText type="small" style={[styles.link, { color: theme.accent }]} numberOfLines={1}>
+            {result.approval_url}
+          </ThemedText>
+        </Pressable>
+
+        <Button
+          title={Platform.OS === 'web' ? (copied ? 'Copied' : 'Copy link') : 'Share link'}
+          variant={copied ? 'success' : 'secondary'}
+          onPress={share}
+          fullWidth
+        />
 
         {/* One line instead of 66 rows. */}
         <View style={[styles.summary, { borderTopColor: theme.border, borderBottomColor: theme.border }]}>
@@ -351,8 +353,6 @@ const styles = StyleSheet.create({
   heading: { textAlign: 'center' },
   sub: { textAlign: 'center', marginTop: -Spacing.two },
 
-  qrWrap: { alignItems: 'center', paddingVertical: Spacing.two },
-  qrSurface: { backgroundColor: '#ffffff', padding: Spacing.three, borderRadius: Radius.card },
 
   linkWrap: { alignItems: 'center' },
   link: { textAlign: 'center' },

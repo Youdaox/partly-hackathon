@@ -37,6 +37,9 @@ export default function RootLayout() {
             hamburger and the re-run action to screen state. */}
         <Stack.Screen name="index" options={{ title: 'Partli' }} />
         <Stack.Screen name="case/[id]" options={{ title: 'Diagnosis' }} />
+        {/* Without these two the header falls back to printing the route path. */}
+        <Stack.Screen name="case/[id]/send" options={{ title: 'Send to customer' }} />
+        <Stack.Screen name="case/[id]/inspection" options={{ title: '3D inspection' }} />
         {/* Legacy: the jobs API flow on apps/api. Superseded by case/[id]. */}
         <Stack.Screen name="job/[id]/capture" options={{ title: 'Live capture' }} />
         <Stack.Screen name="job/[id]/hidden" options={{ title: 'Diagnosis' }} />
