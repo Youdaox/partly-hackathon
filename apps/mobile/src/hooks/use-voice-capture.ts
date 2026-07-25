@@ -1,11 +1,10 @@
 /**
  * Microphone capture for the live damage walkaround.
  *
- * WHAT WORKS TODAY: permissions, recording, and producing a local audio file URI.
- * WHAT IS STUBBED: turning that audio into text. `transcribe()` is the single seam
- * to fill in — see the TODO below. Until it is implemented the capture screen's
- * text input is the way damage gets entered, and everything downstream (part
- * resolution, the oracle, the quote) already works off that text.
+ * This hook records and hands back the local file; it does not transcribe. Transcription
+ * belongs to the backend (`POST /v1/audio/transcribe`), which stores the clip, runs ASR and
+ * turns the transcript into evidence on the case — so the audio must be uploaded rather
+ * than converted on device. `useCase().transcribe` is the other half.
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -17,7 +16,13 @@ import {
   useAudioRecorderState,
 } from 'expo-audio';
 
-export type VoiceCaptureStatus = 'idle' | 'recording' | 'transcribing' | 'unavailable';
+export type VoiceCaptureStatus = 'idle' | 'recording' | 'unavailable';
+
+/** A finished recording, ready to upload. */
+export interface Recording {
+  uri: string;
+  mimeType: string;
+}
 
 export interface UseVoiceCaptureResult {
   status: VoiceCaptureStatus;
@@ -28,20 +33,8 @@ export interface UseVoiceCaptureResult {
   level: number;
   error: string | null;
   start: () => Promise<void>;
-  /** Stops recording and resolves with transcribed text, or null if unavailable. */
-  stop: () => Promise<string | null>;
-}
-
-/**
- * TODO(team): send the recorded audio to a speech-to-text service and return the
- * transcript. The file at `uri` is an m4a on device.
- *
- * Suggested approach: POST the file to a new `/api/transcribe` endpoint on apps/api
- * and call the provider from there, so the API key never ships inside the app
- * bundle. There is a placeholder for the key in apps/api/.env.example.
- */
-async function transcribe(_uri: string): Promise<string | null> {
-  return null;
+  /** Stops recording and resolves with the clip to upload, or null if there is none. */
+  stop: () => Promise<Recording | null>;
 }
 
 export function useVoiceCapture(): UseVoiceCaptureResult {
@@ -92,20 +85,18 @@ export function useVoiceCapture(): UseVoiceCaptureResult {
     }
   }, [recorder, status]);
 
-  const stop = useCallback(async (): Promise<string | null> => {
+  const stop = useCallback(async (): Promise<Recording | null> => {
     if (status !== 'recording') return null;
     try {
       await recorder.stop();
-      setStatus('transcribing');
+      setStatus('idle');
 
       const uri = recorder.uri;
-      const text = uri ? await transcribe(uri) : null;
-
-      setStatus('idle');
-      if (text === null) {
-        setError('Speech-to-text is not wired up yet — type the damage instead.');
+      if (!uri) {
+        setError('The recording produced no audio.');
+        return null;
       }
-      return text;
+      return { uri, mimeType: 'audio/m4a' };
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not stop recording');
       setStatus('idle');

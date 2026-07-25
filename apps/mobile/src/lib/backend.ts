@@ -16,6 +16,8 @@
 import Constants from 'expo-constants';
 import type {
   Attribution,
+  CaseDetail,
+  CaseMessage,
   DamageReport,
   Offer,
   Question,
@@ -65,7 +67,7 @@ export type VehiclePayload = Vehicle;
 export type VehicleListItem = VehicleSummary;
 export type ClarifyingQuestion = Question;
 export type CaseReport = DamageReport;
-export type { Attribution, Offer, ReportLine };
+export type { Attribution, CaseDetail, CaseMessage, Offer, ReportLine };
 
 export class BackendError extends Error {
   constructor(
@@ -114,6 +116,38 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
+/**
+ * POST a multipart body.
+ *
+ * Kept out of `request` because that sets a JSON content-type, and fetch must be left to
+ * write its own `boundary` header — setting it by hand produces a body the server cannot
+ * parse.
+ */
+async function postForm<T>(path: string, form: FormData, failureTitle: string): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(`${BACKEND_BASE_URL}${path}`, { method: 'POST', body: form });
+  } catch (error) {
+    throw new BackendError(
+      0,
+      failureTitle,
+      resolved.unreachableReason ??
+        `Tried ${BACKEND_BASE_URL}. (${error instanceof Error ? error.message : String(error)})`,
+    );
+  }
+
+  const text = await response.text();
+  const body = text ? JSON.parse(text) : null;
+  if (!response.ok) {
+    throw new BackendError(
+      response.status,
+      body?.error?.message ?? `${failureTitle} (${response.status})`,
+      body?.error?.code,
+    );
+  }
+  return body as T;
+}
+
 export const backend = {
   listVehicles: () => request<{ vehicles: VehicleListItem[] }>('/vehicles'),
 
@@ -132,7 +166,48 @@ export const backend = {
       body: JSON.stringify({ vehicle_id: vehicleId }),
     }),
 
-  getCase: (caseId: string) => request<CaseReport>(`/case/${caseId}`),
+  /** The case with its message history. Note: `CaseDetail`, not a report. */
+  getCase: (caseId: string) => request<CaseDetail>(`/case/${caseId}`),
+
+  /**
+   * Upload photos or a walkaround video. Accepted (202); the backend stores each asset,
+   * pulls keyframes from video and runs vision over them, then folds the result into the
+   * case as evidence — so the caller re-reads the report afterwards.
+   *
+   * Video keyframe extraction needs `ffmpeg` on the backend host. Without it the clip is
+   * stored and accepted but yields no frames to analyse.
+   */
+  uploadMedia: async (
+    caseId: string,
+    kind: 'image' | 'video',
+    files: { uri: string; name: string; type: string }[],
+  ): Promise<{ media_ids: string[]; status: string }> => {
+    const form = new FormData();
+    form.append('case_id', caseId);
+    form.append('kind', kind);
+    // `files` is a list on the server, so the field repeats.
+    for (const file of files) form.append('files', file as unknown as Blob);
+    return postForm('/media/upload', form, 'Could not upload the media');
+  },
+
+  /**
+   * Upload a voice clip. Accepted (202) and transcribed in the background, so the caller
+   * polls `getCase` for the message's `transcript` to fill in.
+   *
+   * Multipart, so it cannot go through `request` — that sets a JSON content-type, and
+   * fetch must be left to write its own boundary header.
+   */
+  transcribeAudio: (
+    caseId: string,
+    uri: string,
+    mimeType = 'audio/m4a',
+  ): Promise<{ message_id: string; status: string }> => {
+    const form = new FormData();
+    form.append('case_id', caseId);
+    // React Native accepts this shape where the web would need a Blob.
+    form.append('file', { uri, name: 'clip.m4a', type: mimeType } as unknown as Blob);
+    return postForm('/audio/transcribe', form, 'Could not upload the recording');
+  },
 
   /** Accepted (202) — evidence is appended and the prediction recomputed. */
   sendMessage: (caseId: string, text: string) =>
@@ -147,8 +222,12 @@ export const backend = {
       body: JSON.stringify({ question_id: questionId, value }),
     }),
 
+  /**
+   * Kick off a re-score. Returns an acknowledgement, **not** the report — read it back
+   * with `getResults`. Typing this as a report is what let a blank screen through once.
+   */
   runPrediction: (caseId: string) =>
-    request<CaseReport>('/prediction/run', {
+    request<{ prediction_id: string; computed_ms: number }>('/prediction/run', {
       method: 'POST',
       body: JSON.stringify({ case_id: caseId }),
     }),
@@ -170,6 +249,30 @@ export const backend = {
   getOffers: (partId: string) =>
     request<{ part_id: string; offers: Offer[]; simulated: boolean }>(`/parts/${partId}/offers`),
 };
+
+/**
+ * Wait for a vehicle to stop resolving.
+ *
+ * `POST /vehicle/register` returns straight away with `status: "resolving"`, and
+ * `POST /case` refuses an unresolved vehicle with 409 `vehicle_not_ready` — so anything
+ * that needs a case has to wait for this first. Resolves with the settled vehicle whatever
+ * the outcome (`catalogue_ready`, `no_catalogue`, `not_found`); the caller decides.
+ */
+export async function waitForVehicleReady(
+  vehicleId: string,
+  timeoutMs = 15_000,
+  intervalMs = 400,
+): Promise<VehiclePayload> {
+  const deadline = Date.now() + timeoutMs;
+  let vehicle = await backend.getVehicle(vehicleId);
+
+  while (vehicle.status === 'resolving' && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    vehicle = await backend.getVehicle(vehicleId);
+  }
+
+  return vehicle;
+}
 
 /**
  * Poll a vehicle until resolution settles, calling back on every change.
