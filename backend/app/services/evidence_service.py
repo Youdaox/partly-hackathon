@@ -26,6 +26,9 @@ MAX_MERGED_P = 0.98
 # more parts of that class are plausible targets.
 KLASS_SPREAD_FLOOR = 0.25
 MAX_KLASS_TARGETS = 6
+# Depth assumed reachable once the repairer mentions stripping the car down.
+# Conservative: it says "they are working on it", not "it is fully apart".
+TEARDOWN_EXPOSED_DEPTH = 3
 
 
 def merge(case: Case, catalogue: Catalogue | None) -> Evidence:
@@ -108,3 +111,8 @@ def apply_speech(case: Case, evidence) -> None:
     if evidence.severity:
         case.severity = evidence.severity
         case.severity_source = "speech"
+    # "the wheel has been removed" means the car is further apart than we
+    # thought, so deeper parts are now worth walking over to look at.
+    if evidence.teardown_mentioned:
+        case.exposed_depth = max(case.exposed_depth, TEARDOWN_EXPOSED_DEPTH)
+

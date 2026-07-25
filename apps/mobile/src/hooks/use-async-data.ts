@@ -6,7 +6,7 @@
  * all handle failure the same way.
  *
  * ```ts
- * const jobs = useAsyncData(() => api.getJob(jobId), [jobId]);
+ * const jobs = useAsyncData(() => api.getReport(caseId), [caseId]);
  * jobs.data; jobs.error; jobs.loading; await jobs.reload();
  * ```
  */
@@ -42,7 +42,7 @@ export function useAsyncData<T>(
   const [error, setError] = useState<{ title: string; detail?: string } | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Callers pass an inline arrow (`() => api.getJob(id)`), which is a new function every
+  // Callers pass an inline arrow (`() => api.getReport(id)`), which is a new function every
   // render. Holding it in a ref keeps `run` stable so it is safe to depend on.
   const fetcherRef = useRef(fetcher);
   useEffect(() => {

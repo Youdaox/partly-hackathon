@@ -4,7 +4,7 @@
 
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import type { JobStatus } from '@partli/shared';
+import { relativeTime, type CaseStatus } from '@partli/shared';
 
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -17,24 +17,30 @@ export const metadata: Metadata = {
 // Always render fresh: jobs change while the page is open.
 export const dynamic = 'force-dynamic';
 
-const STATUS_LABEL: Record<JobStatus, string> = {
-  capturing: 'Capturing',
-  predicted: 'Hidden damage found',
+const STATUS_LABEL: Record<CaseStatus, string> = {
+  open: 'Just started',
+  analysing: 'Analysing',
+  ready: 'Hidden damage found',
+  ordered: 'Parts ordered',
   sent_to_customer: 'Awaiting customer',
   approved: 'Approved',
+  closed: 'Closed',
 };
 
-const STATUS_VARIANT: Record<JobStatus, 'secondary' | 'default' | 'success'> = {
-  capturing: 'secondary',
-  predicted: 'default',
+const STATUS_VARIANT: Record<CaseStatus, 'secondary' | 'default' | 'success'> = {
+  open: 'secondary',
+  analysing: 'secondary',
+  ready: 'default',
+  ordered: 'default',
   sent_to_customer: 'default',
   approved: 'success',
+  closed: 'secondary',
 };
 
 export default async function DashboardPage() {
   let jobs;
   try {
-    jobs = await api.listJobs();
+    jobs = await api.listCases();
   } catch (error) {
     const apiError = error instanceof ApiError ? error : null;
     return (
@@ -45,7 +51,7 @@ export default async function DashboardPage() {
           </CardHeader>
           <CardContent>
             <p className="text-sm text-muted-foreground">
-              {apiError?.detail ?? 'Is the API running? Try `pnpm dev` from the repo root.'}
+              {apiError?.detail ?? 'Is the API running? Start it with `backend/.venv/bin/uvicorn app.main:app --port 8080`.'}
             </p>
           </CardContent>
         </Card>
@@ -80,31 +86,28 @@ export default async function DashboardPage() {
       ) : (
         <ul className="space-y-3">
           {jobs.map((job) => (
-            <li key={job.id}>
+            <li key={job.case_id}>
               <Card>
                 <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
                   <div className="min-w-0">
                     <p className="font-medium">
-                      {job.vehicle.make.toUpperCase()} {job.vehicle.model}
+                      {(job.vehicle.make ?? '').toUpperCase()} {job.vehicle.model ?? ''}
                       {job.vehicle.year ? ` · ${job.vehicle.year}` : ''}
                     </p>
                     <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
-                      {job.vehicle.slug}
+                      {job.vehicle.rego ?? job.case_id}
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      Started{' '}
-                      {new Date(job.createdAt).toLocaleString('en-NZ', {
-                        dateStyle: 'medium',
-                        timeStyle: 'short',
-                      })}
+                      {job.impact.zone} {job.impact.side === 'both' ? 'both sides' : ''} · severity{' '}
+                      {job.impact.severity} · started {relativeTime(job.created_at)}
                     </p>
                   </div>
 
                   <div className="flex shrink-0 items-center gap-3">
                     <Badge variant={STATUS_VARIANT[job.status]}>{STATUS_LABEL[job.status]}</Badge>
-                    {job.status === 'sent_to_customer' || job.status === 'approved' ? (
+                    {job.approval_token ? (
                       <Link
-                        href={`/approve/${job.id}`}
+                        href={`/approve/${job.approval_token}`}
                         className="text-sm text-primary underline-offset-4 hover:underline"
                       >
                         View quote

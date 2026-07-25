@@ -2,8 +2,12 @@
  * Pull a vehicle out of free text.
  *
  * The entry screen lets a repairer type one sentence — "yaris front right hit, bumper
- * hanging off" — and turns it into a job. That means working out which vehicle they
+ * hanging off" — and turns it into a case. That means working out which vehicle they
  * meant and what is left over to treat as a damage description.
+ *
+ * The backend is addressed by registration, so a match also carries the vehicle's
+ * rego: a repairer can name the car ("yaris") or read the plate ("QMN16") and both
+ * land in the same place.
  *
  * Pure and framework-free, so it runs on device and is easy to test.
  */
@@ -69,7 +73,7 @@ export function matchVehicle(
   }
 
   const candidates = options.requireCatalogue
-    ? vehicles.filter((v) => v.hasCatalogue)
+    ? vehicles.filter((v) => v.has_catalogue)
     : vehicles;
 
   let best: VehicleMatch | null = null;
@@ -92,6 +96,14 @@ export function matchVehicle(
     if (makeTerm && squashedTokens.includes(makeTerm)) {
       score += 1;
       matchedTerms.push(makeTerm);
+    }
+
+    // The plate itself, which is what the API is actually keyed by.
+    const regoTerm = squash(vehicle.rego ?? '');
+    if (regoTerm && squashedTokens.includes(regoTerm)) {
+      // Strongest possible signal: a plate identifies exactly one vehicle.
+      score += 5;
+      matchedTerms.push(regoTerm);
     }
 
     // Slug fragments catch spellings the parsed model misses.

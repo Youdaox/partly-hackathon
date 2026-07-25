@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 
 from app.ai.base import ASRProvider, VisionProvider
-from app.catalogue import registry
+from app.catalogue import registry, vocabulary
 from app.engines import orchestrator
 from app.engines.history import EMPTY_HISTORY
 from app.services import (
@@ -62,6 +62,7 @@ def repredict(case_id: str, rank_inspections: bool = True) -> dict | None:
             evidence,
             EMPTY_HISTORY,
             conflicts=case.conflicts,
+            asked=frozenset(case.questions_asked),
             rank_inspections=rank_inspections,
         )
 
@@ -155,8 +156,14 @@ async def _audio_task(case: Case, audio: bytes, mime: str, asr: ASRProvider,
 
 async def _transcribe(case: Case, audio: bytes, mime: str, asr: ASRProvider,
                       message_id: str | None = None) -> None:
+    # Bias the ASR towards this vehicle's own part names (spec 8.3). The
+    # catalogue is already in memory from the parallel VIN workflow, so this
+    # costs nothing and "slam panel" stops coming back as "slam pannel".
+    _, vehicle = _catalogue(case)
+    hints = vocabulary.phrase_hints(vehicle.slug if vehicle else None, case.zone)
+
     try:
-        transcript = await speech_service.transcribe(asr, audio, mime)
+        transcript = await speech_service.transcribe(asr, audio, mime, hints)
     except Exception:  # noqa: BLE001
         sse.publish(case.id, "analysis", {"stage": "asr", "error": "transcription_failed"})
         return
@@ -174,11 +181,59 @@ async def _transcribe(case: Case, audio: bytes, mime: str, asr: ASRProvider,
     ingest_text(case, transcript.text, source="speech", source_ref=message.id)
 
 
+def confirm_klass(case: Case, klass: str, damaged: bool) -> int:
+    """Clamp every part of a class in the impact zone.
+
+    Used when the repairer answers about a whole class ("the suspension") rather
+    than a specific part, which is how they actually talk.
+    """
+    catalogue, _ = _catalogue(case)
+    if catalogue is None:
+        return 0
+
+    touched = 0
+    for part in catalogue.parts:
+        if part.klass != klass or part.zone != case.zone:
+            continue
+        if case.side in ("L", "R") and part.side not in (case.side, "C"):
+            continue
+        cases.set_confirmation(case, part.part_id, damaged)
+        if damaged:
+            case.exposed_depth = max(case.exposed_depth, part.depth)
+        touched += 1
+    return touched
+
+
+def retract_observations(case: Case, source_ref: str) -> int:
+    """Drop the observations a single message produced.
+
+    The observation table is append-only as a rule (spec 7.4), but a corrected
+    transcript is not new evidence — it is a statement that the old evidence was
+    never said. Leaving it in would mean a misheard part stayed in the report
+    after the repairer fixed the words.
+    """
+    keep = [o for o in case.observations if o.source_ref != source_ref]
+    removed = len(case.observations) - len(keep)
+    case.observations = keep
+
+    # Questions the retracted wording raised go with it. Otherwise a misheard
+    # "rail" keeps being asked about after it was corrected to "grille".
+    case.question_candidates = {
+        klass: ref for klass, ref in case.question_candidates.items() if ref != source_ref
+    }
+    cases.touch(case)
+    return removed
+
+
 def ingest_text(case: Case, text: str, source: str = "speech",
                 source_ref: str | None = None) -> None:
     """Shared path for a transcript and for typed text (spec 6.3)."""
     extracted = speech_service.extract(text)
     evidence_service.apply_speech(case, extracted)
+
+    # A thing they raised and could not settle beats anything we merely inferred.
+    for klass in extracted.question_candidates:
+        case.question_candidates.setdefault(klass, source_ref)
 
     observations = [
         cases.make_observation(case.id, klass=klass, p=p, source=source, source_ref=source_ref)
@@ -228,6 +283,9 @@ def seed_from_interpreter(case: Case) -> None:
     case.impact_evidence = parsed.evidence[:8]
     case.impact_confidence = parsed.confidence
     case.conflicts = parsed.conflicts
+    # Frames describing stripped-off components tell us how far teardown has
+    # already got, which gates what is worth inspecting next.
+    case.exposed_depth = max(case.exposed_depth, parsed.exposed_depth)
 
     cases.add_observations(
         case,

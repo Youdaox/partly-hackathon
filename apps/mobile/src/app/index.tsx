@@ -49,10 +49,12 @@ export default function EntryScreen() {
 
   const [draft, setDraft] = useState('');
   const [starting, setStarting] = useState(false);
+  // VIN resolution takes a second or two, so say what is happening rather than spin.
+  const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<{ title: string; detail?: string } | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
 
-  const startable = (vehicles.data ?? []).filter((v) => v.hasCatalogue);
+  const startable = (vehicles.data ?? []).filter((v) => v.has_catalogue);
 
   const begin = useCallback(
     async (vehicle: VehicleSummary, damageText: string) => {
@@ -62,36 +64,33 @@ export default function EntryScreen() {
       const said = damageText.trim();
 
       try {
-        // Seeding from the shipped AI prediction means the job opens already populated,
-        // and anything typed is layered on top (the same part twice is an upsert).
-        const job = await api.createJob(vehicle.slug, true);
+        // Registering the plate kicks off the VIN lookup; the case cannot open
+        // until it lands, so `startCase` does that waiting for us. The case is
+        // seeded from the shipped Interpreter output, so it opens populated.
+        setStatus('Looking up the plate…');
+        const { caseId } = await api.startCase(vehicle.rego, (vehicleStatus) => {
+          setStatus(
+            vehicleStatus === 'catalogue_ready'
+              ? 'Loading the parts catalogue…'
+              : 'Looking up the plate…',
+          );
+        });
 
-        let unmatched: string | undefined;
-        if (said) {
-          try {
-            await api.addDamage(job.id, said, 'voice');
-          } catch {
-            // No catalogue part matched the wording. Don't lose what they typed —
-            // hand it to the next screen so they can reword it in the follow-up box.
-            unmatched = said;
-          }
-        }
+        // Whatever they said about the damage is just a message on the case —
+        // the same path a voice transcript takes.
+        if (said) await api.sendMessage(caseId, said);
 
-        // Straight to the diagnosis. The oracle runs on arrival, so the first thing the
-        // repairer sees is ranked hidden damage rather than an empty capture form.
+        // Straight to the diagnosis: the report is already computed on arrival.
         router.push({
           pathname: '/job/[id]/hidden',
-          params: {
-            id: job.id,
-            ...(said ? { said } : {}),
-            ...(unmatched ? { draft: unmatched } : {}),
-          },
+          params: { id: caseId, ...(said ? { said } : {}) },
         });
         setDraft('');
       } catch (err) {
         setError(toErrorInfo(err));
       } finally {
         setStarting(false);
+        setStatus(null);
       }
     },
     [router],
@@ -112,8 +111,8 @@ export default function EntryScreen() {
       setError({
         title: 'Which vehicle is that?',
         detail: startable.length
-          ? `Name it in your sentence. Available: ${startable
-              .map((v) => `${v.make} ${v.model}`)
+          ? `Name it in your sentence, or read the plate. Available: ${startable
+              .map((v) => `${v.make} ${v.model} (${v.rego})`)
               .join(', ')}.`
           : 'No vehicles with a parts catalogue were found. Is the API running?',
       });
@@ -137,7 +136,9 @@ export default function EntryScreen() {
     setError({
       title: startable.length ? 'Vehicles with a parts catalogue' : 'No catalogue vehicles found',
       detail: startable.length
-        ? `${startable.map((v) => `${v.make} ${v.model}`).join(', ')}. Name one in your sentence.`
+        ? `${startable
+            .map((v) => `${v.make} ${v.model} (${v.rego})`)
+            .join(', ')}. Name one, or read out its plate.`
         : 'Is the API running?',
     });
   }, [startable]);
@@ -274,6 +275,14 @@ export default function EntryScreen() {
                   onPress={showVehicles}
                 />
               </View>
+
+              {status ? (
+                <View style={styles.error}>
+                  <ThemedText type="small" themeColor="textSecondary">
+                    {status}
+                  </ThemedText>
+                </View>
+              ) : null}
 
               {/* The only thing that ever sits under the starters. */}
               {error ? (

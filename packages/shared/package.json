@@ -9,10 +9,6 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    },
-    "./dataset": {
-      "types": "./dist/dataset/index.d.ts",
-      "default": "./dist/dataset/index.js"
     }
   },
   "files": ["dist"],

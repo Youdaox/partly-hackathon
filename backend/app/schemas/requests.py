@@ -22,6 +22,12 @@ class AnswerRequest(BaseModel):
     value: str
 
 
+class TranscriptEditRequest(BaseModel):
+    """Spec 8.4: a wrong transcript is editable, and edits re-run extraction."""
+
+    text: str = Field(min_length=1, max_length=2000)
+
+
 class AnalyseRequest(BaseModel):
     case_id: str
 
@@ -46,3 +52,9 @@ class OrderLineRequest(BaseModel):
 class FinaliseRequest(BaseModel):
     case_id: str
     lines: list[OrderLineRequest]
+
+
+class SubmitApprovalRequest(BaseModel):
+    """The customer picking one supply option for the whole quote."""
+
+    option_id: str

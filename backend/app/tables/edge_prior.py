@@ -17,7 +17,7 @@ Relations:
 
 EDGE_PRIOR: dict[tuple[str, str, str], float] = {
     # --- bumper cover comes off ---------------------------------------------
-    ("bumper_cover", "cover_retainer", "hardware"): 0.92,
+    ("bumper_cover", "cover_retainer", "hardware"): 0.90,   # 9.2 diagram
     ("bumper_cover", "clip", "hardware"): 0.85,
     ("bumper_cover", "grille", "mounts"): 0.62,
     ("bumper_cover", "bumper_absorber", "load_path"): 0.58,
@@ -32,7 +32,7 @@ EDGE_PRIOR: dict[tuple[str, str, str], float] = {
     ("grille", "clip", "hardware"): 0.80,
     # --- absorber into the beam --------------------------------------------
     ("bumper_absorber", "reinforcement_beam", "load_path"): 0.52,
-    ("reinforcement_beam", "crash_box", "load_path"): 0.36,
+    ("reinforcement_beam", "crash_box", "load_path"): 0.55, # 9.2 diagram
     ("reinforcement_beam", "radiator_support", "adjacent"): 0.34,
     ("reinforcement_beam", "clip", "hardware"): 0.60,
     ("crash_box", "side_member", "load_path"): 0.30,
@@ -43,7 +43,7 @@ EDGE_PRIOR: dict[tuple[str, str, str], float] = {
     ("apron", "washer_tank", "mounts"): 0.30,
     ("apron", "coolant_reservoir", "mounts"): 0.28,
     # --- headlamp -----------------------------------------------------------
-    ("headlamp", "lamp_bracket", "mounts"): 0.66,
+    ("headlamp", "lamp_bracket", "mounts"): 0.70,          # 9.2 diagram
     ("headlamp", "radiator_support", "mounts"): 0.40,
     ("headlamp", "clip", "hardware"): 0.72,
     ("headlamp", "harness", "harness"): 0.30,
@@ -52,7 +52,7 @@ EDGE_PRIOR: dict[tuple[str, str, str], float] = {
     ("fog_lamp", "lamp_bracket", "mounts"): 0.55,
     ("fog_lamp", "harness", "harness"): 0.25,
     # --- slam panel and cooling pack ---------------------------------------
-    ("radiator_support", "lamp_bracket", "mounts"): 0.58,
+    ("lamp_bracket", "radiator_support", "mounts"): 0.40,   # 9.2 diagram
     ("radiator_support", "radiator", "mounts"): 0.42,
     ("radiator_support", "horn", "mounts"): 0.34,
     ("radiator_support", "bonnet_latch", "mounts"): 0.38,

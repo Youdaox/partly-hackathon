@@ -27,6 +27,10 @@ class VisionObservation:
     p: float
     label: str
     diagram_id: str | None = None
+    # spec 8.2: destroyed | detached | cracked | dented | scuffed | intact
+    state: str | None = None
+    # spec 8.2: high | low
+    certainty: str | None = None
 
 
 @dataclass(slots=True)
@@ -38,11 +42,18 @@ class VisionResult:
     evidence: list[str] = field(default_factory=list)
     observations: list[VisionObservation] = field(default_factory=list)
     conflicts: list[dict] = field(default_factory=list)
+    # The two checks that move an assessment more than anything else (spec 8.2).
+    # None means the frames did not settle it either way, which is different
+    # from False and must not be reported as a negative finding.
+    wheel_displaced: bool | None = None
+    airbag_deployed: bool | None = None
     provider: str = "stub"
 
 
 class ASRProvider(Protocol):
-    async def transcribe(self, audio: bytes, mime: str) -> Transcript: ...
+    async def transcribe(
+        self, audio: bytes, mime: str, phrase_hints: list[str] | None = None
+    ) -> Transcript: ...
 
 
 class VisionProvider(Protocol):

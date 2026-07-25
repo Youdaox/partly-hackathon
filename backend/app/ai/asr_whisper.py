@@ -30,8 +30,12 @@ class StubASR:
 
     name = "stub"
 
-    async def transcribe(self, audio: bytes, mime: str) -> Transcript:
-        key = cache.key_for(audio, PROMPT_VERSION)
+    async def transcribe(
+        self, audio: bytes, mime: str, phrase_hints: list[str] | None = None
+    ) -> Transcript:
+        # Hints are part of the cache key: a transcript produced with a
+        # vehicle's vocabulary is not the same result as one produced without it.
+        key = cache.key_for(audio, f"{PROMPT_VERSION}:{len(phrase_hints or [])}")
         cached = cache.load("asr", key)
         if cached is not None:
             return Transcript(**cached)
@@ -44,14 +48,22 @@ class StubASR:
 
 
 class WhisperProvider:
-    """Placeholder for the real provider. Not wired up in this build."""
+    """Placeholder for the real provider. Not wired up in this build.
+
+    `phrase_hints` is the interesting parameter: it carries the ~200 most likely
+    part names for the resolved vehicle (see catalogue.vocabulary). Whisper takes
+    these via `initial_prompt`; hosted ASRs generally take a speech-context or
+    keyword-boost list.
+    """
 
     name = "whisper"
 
     def __init__(self, model: str = "whisper-1"):
         self.model = model
 
-    async def transcribe(self, audio: bytes, mime: str) -> Transcript:
+    async def transcribe(
+        self, audio: bytes, mime: str, phrase_hints: list[str] | None = None
+    ) -> Transcript:
         raise NotImplementedError(
             "WhisperProvider is a stub: this build has no model credentials. "
             "Implement transcribe() and swap it in via app.api.deps."

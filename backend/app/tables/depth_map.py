@@ -22,8 +22,9 @@ DEPTH_MAP: dict[str, int] = {
     "door_panel": 1,
     "mirror": 1,
     "windscreen": 1,
+    # 1 — the retainer is destroyed the moment the cover moves (spec 9.3 table)
+    "cover_retainer": 1,
     # 2 — fasteners and shields immediately behind the skin
-    "cover_retainer": 2,
     "clip": 2,
     "bumper_absorber": 2,
     "splash_shield": 2,
@@ -35,11 +36,12 @@ DEPTH_MAP: dict[str, int] = {
     "lamp_bracket": 3,
     "bracket": 3,
     "reinforcement_beam": 3,
-    "crash_box": 3,
-    "radiator_support": 3,
     "bonnet_hinge": 3,
     "bonnet_latch": 3,
-    # 4 — cooling pack and ancillaries behind the beam
+    "harness": 3,
+    # 4 — the collapse sequence behind the beam (spec 9.2 diagram)
+    "crash_box": 4,
+    "radiator_support": 4,
     "radiator": 4,
     "condenser": 4,
     "cooling_fan": 4,
@@ -50,17 +52,16 @@ DEPTH_MAP: dict[str, int] = {
     # 5 — rails, suspension, hubs
     "side_member": 5,
     "apron": 5,
-    "strut_tower": 5,
     "suspension_arm": 5,
     "steering_knuckle": 5,
     "wheel_hub": 5,
     "drive_shaft": 5,
     "brake_disc": 5,
     # 6 — deep structure and systems
+    "strut_tower": 6,
     "subframe": 6,
     "engine_mount": 6,
     "airbag_module": 6,
-    "harness": 6,
     "ecu": 6,
     "firewall": 6,
     "steering_rack": 6,

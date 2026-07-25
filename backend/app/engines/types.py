@@ -78,13 +78,15 @@ class Prediction:
 
 @dataclass(slots=True)
 class Inspection:
-    """How much is learned by going and looking at one part."""
+    """How much is learned by going and looking at one part (spec 9.5)."""
 
     part_id: str
     value: float
     own: float
     downstream: float
     accessible: bool
+    # Parts whose bucket flips depending on this answer.
+    informs: list[str] = field(default_factory=list)
     rank: int = 0
 
 

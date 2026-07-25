@@ -1,216 +1,218 @@
 #!/usr/bin/env node
 /**
- * End-to-end smoke test for the Partli API.
+ * End-to-end smoke test against a running backend.
  *
- * Walks the entire demo path: create a job, add damage, run the oracle, confirm a
- * prediction, send to the customer, then approve as the customer.
+ * Walks the whole repairer journey the way the mobile app does — register a
+ * plate, wait for VIN resolution, open a case, talk to it, confirm a part, quote
+ * it, approve it — then checks the failure paths.
  *
- *   node scripts/smoke.mjs                       # against http://localhost:4000
- *   node scripts/smoke.mjs http://10.0.0.5:4000  # against a LAN address
+ *   node scripts/smoke.mjs                       # against http://localhost:8080
+ *   node scripts/smoke.mjs http://10.0.0.5:8080  # against a LAN address
  */
 
-const BASE = process.argv[2] ?? process.env.API_BASE_URL ?? 'http://localhost:4000';
-const SLUG = process.env.VEHICLE_SLUG ?? 'toyota-yaris-qmn16';
+const BASE = process.argv[2] ?? process.env.API_BASE_URL ?? 'http://localhost:8080';
+const V1 = `${BASE}/v1`;
 
-let failures = 0;
+const REGO = process.env.REGO ?? 'QMN16';
+const NO_CATALOGUE_REGO = 'NUE975';
 
-function check(label, condition, extra = '') {
-  const mark = condition ? '[32mPASS[0m' : '[31mFAIL[0m';
-  console.log(`  ${mark}  ${label}${extra ? ` — ${extra}` : ''}`);
-  if (!condition) failures++;
-  return condition;
+let passed = 0;
+let failed = 0;
+
+const green = (s) => `\x1b[32m${s}\x1b[0m`;
+const red = (s) => `\x1b[31m${s}\x1b[0m`;
+const dim = (s) => `\x1b[2m${s}\x1b[0m`;
+
+function check(label, condition, detail) {
+  if (condition) {
+    passed++;
+    console.log(`  ${green('✓')} ${label}`);
+  } else {
+    failed++;
+    console.log(`  ${red('✗')} ${label}${detail ? dim(` — ${detail}`) : ''}`);
+  }
 }
 
 async function call(method, path, body) {
-  const response = await fetch(`${BASE}${path}`, {
+  const response = await fetch(`${V1}${path}`, {
     method,
     headers: body ? { 'content-type': 'application/json' } : undefined,
     body: body ? JSON.stringify(body) : undefined,
   });
   const text = await response.text();
-  let json;
-  try {
-    json = text ? JSON.parse(text) : null;
-  } catch {
-    json = text;
-  }
+  const parsed = text ? JSON.parse(text) : null;
   if (!response.ok) {
-    throw new Error(`${method} ${path} -> ${response.status} ${JSON.stringify(json)}`);
+    const error = new Error(parsed?.error?.message ?? `${method} ${path} → ${response.status}`);
+    error.status = response.status;
+    error.code = parsed?.error?.code;
+    throw error;
   }
-  return json;
+  return parsed;
 }
 
-function heading(title) {
-  console.log(`\n[1m${title}[0m`);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Register a plate and wait out the simulated VIN latency, as the app does. */
+async function startCase(rego) {
+  const registered = await call('POST', '/vehicle/register', { rego });
+  let vehicle = await call('GET', `/vehicle/${registered.vehicle_id}`);
+  const deadline = Date.now() + 15_000;
+  while (vehicle.status === 'resolving' && Date.now() < deadline) {
+    await sleep(250);
+    vehicle = await call('GET', `/vehicle/${registered.vehicle_id}`);
+  }
+  const created = await call('POST', '/case', { vehicle_id: vehicle.vehicle_id });
+  return { caseId: created.case_id, vehicle };
+}
+
+async function expectError(label, code, fn) {
+  try {
+    await fn();
+    check(label, false, 'expected an error, got success');
+  } catch (error) {
+    check(label, error.code === code, `got ${error.code ?? error.message}`);
+  }
 }
 
 async function main() {
-  console.log(`Partli smoke test against ${BASE}`);
+  console.log(`\nSmoke test against ${BASE}\n`);
 
-  heading('health');
-  const health = await call('GET', '/health');
-  check('API is up', health.ok === true, `driver=${health.driver}`);
+  console.log('health');
+  const health = await fetch(`${BASE}/healthz`).then((r) => r.json());
+  check('catalogues preloaded at boot', health.vehicles_loaded >= 1, JSON.stringify(health));
+  check('parts indexed', health.parts_indexed > 7000, `${health.parts_indexed}`);
 
-  heading('vehicles');
-  const vehicles = await call('GET', '/api/vehicles');
-  const withCatalogue = vehicles.filter((v) => v.hasCatalogue);
-  check('fleet is listed', vehicles.length >= 8, `${vehicles.length} vehicles`);
-  check('three have a full catalogue', withCatalogue.length === 3,
-    withCatalogue.map((v) => v.slug).join(', '));
-  check('catalogue vehicles sort first', vehicles[0].hasCatalogue === true);
+  console.log('\nvehicles');
+  const { vehicles } = await call('GET', '/vehicles');
+  check('vehicle index is served', vehicles.length >= 8, `${vehicles.length} vehicles`);
+  check(
+    'some vehicles have a prediction but no catalogue',
+    vehicles.some((v) => v.has_prediction && !v.has_catalogue),
+  );
 
-  heading('parts search');
-  const found = await call('GET', `/api/vehicles/${SLUG}/parts?q=front%20bumper%20cover`);
-  check('free text resolves to catalogue parts', found.length > 0,
-    found[0]?.displayName);
+  console.log('\ncase');
+  const { caseId, vehicle } = await startCase(REGO);
+  check('rego resolves to a VIN', vehicle.vin === 'JTDKBAA3301006094', vehicle.vin);
+  check('catalogue is ready', vehicle.status === 'catalogue_ready', vehicle.status);
+  check('parts indexed for this vehicle', vehicle.parts_indexed === 7009, `${vehicle.parts_indexed}`);
 
-  heading('create job');
-  const job = await call('POST', '/api/jobs', { vehicleSlug: SLUG, seedFromPrediction: true });
-  check('job created', Boolean(job.id), job.id);
-  check('starts in capturing', job.status === 'capturing');
+  let report = await call('GET', `/prediction/results/${caseId}`);
+  check('the first report is already populated', report.sections.visible.length > 0);
+  check('a report has all three sections', Object.keys(report.sections).length === 3);
+  check('check is capped at 5', report.sections.check.length <= 5);
+  check('payload is under 20 KB', JSON.stringify(report).length < 20480);
 
-  heading('visible damage');
-  const voiceItem = await call('POST', `/api/jobs/${job.id}/damage`, {
-    rawText: 'left headlamp assembly',
-    source: 'voice',
+  console.log('\nevidence');
+  await call('POST', `/case/${caseId}/messages`, {
+    text: "front right's taken a hit, the reo is bent",
   });
-  check('voice text resolved to a real part', Boolean(voiceItem.partId),
-    voiceItem.displayName);
+  report = await call('GET', `/prediction/results/${caseId}`);
+  check('speech sets the side', report.impact.side === 'R', report.impact.side);
+  check('a bent reo reads as structural', report.impact.severity >= 4, `${report.impact.severity}`);
 
-  let state = await call('GET', `/api/jobs/${job.id}`);
-  check('prediction seeding populated the list', state.visibleDamage.length > 1,
-    `${state.visibleDamage.length} items`);
-  check('vehicle details resolve', state.vehicle?.model === 'YARIS',
-    `${state.vehicle?.make} ${state.vehicle?.model} ${state.vehicle?.year}`);
+  const msg = await call('POST', `/case/${caseId}/messages`, { text: 'not sure about the rail' });
+  report = await call('GET', `/prediction/results/${caseId}`);
+  check(
+    'an unsure mention becomes the question',
+    report.question?.id === 'q_raised_side_member',
+    report.question?.id,
+  );
 
-  console.log('    visible damage:');
-  for (const item of state.visibleDamage) {
-    console.log(`      - ${item.displayName}  [${item.source}]`);
-  }
-
-  heading('oracle: predict hidden damage');
-  const { predictions } = await call('POST', `/api/jobs/${job.id}/oracle/predict`, { limit: 8 });
-  check('oracle returned predictions', predictions.length > 0, `${predictions.length} items`);
-  check('scores are in 0..1', predictions.every((p) => p.confidenceScore >= 0 && p.confidenceScore <= 1));
-  check('sorted by confidence', predictions.every((p, i) =>
-    i === 0 || predictions[i - 1].confidenceScore >= p.confidenceScore));
-  check('every prediction explains itself', predictions.every((p) => p.reason?.length > 0));
-  check('no duplicate part names', new Set(predictions.map((p) => p.displayName)).size === predictions.length);
-
-  const visibleNames = new Set(state.visibleDamage.map((d) => d.displayName.toLowerCase()));
-  check('does not re-suggest visible damage',
-    predictions.every((p) => !visibleNames.has(p.displayName.toLowerCase())));
-
-  console.log('    ranked hidden damage:');
-  for (const p of predictions) {
-    console.log(`      ${String(Math.round(p.confidenceScore * 100)).padStart(3)}%  ${p.displayName}`);
-    console.log(`            ${p.reason}`);
-  }
-
-  state = await call('GET', `/api/jobs/${job.id}`);
-  check('job advanced to predicted', state.status === 'predicted', state.status);
-
-  heading('oracle: confirm and deny');
-  const confirmed = await call('POST', `/api/jobs/${job.id}/oracle/confirm`, {
-    predictionId: predictions[0].id,
-    confirmed: true,
+  const edited = await call('PATCH', `/case/${caseId}/messages/${msg.message_id}`, {
+    text: 'not sure about the grille',
   });
-  check('confirming pins confidence to 1', confirmed.confirmed === true && confirmed.confidenceScore === 1);
+  check(
+    'editing a transcript re-runs extraction',
+    edited.question?.id === 'q_raised_grille',
+    edited.question?.id,
+  );
 
-  const denied = await call('POST', `/api/jobs/${job.id}/oracle/confirm`, {
-    predictionId: predictions[1].id,
-    confirmed: false,
-  });
-  check('denying pins confidence to 0', denied.confirmed === false && denied.confidenceScore === 0);
+  console.log('\nconfirm loop');
+  report = await call('GET', `/prediction/results/${caseId}`);
+  if (report.sections.check.length > 0) {
+    const target = report.sections.check[0];
+    const started = Date.now();
+    const after = await call('POST', '/inspection/confirm', {
+      case_id: caseId,
+      part_id: target.part_id,
+      damaged: true,
+    });
+    const elapsed = Date.now() - started;
+    check(`confirm round trip under 150 ms (${elapsed} ms)`, elapsed < 150, `${elapsed} ms`);
+    check(
+      'confirming promotes the part to visible',
+      after.sections.visible.some((l) => l.part_id === target.part_id),
+    );
 
-  state = await call('GET', `/api/jobs/${job.id}`);
-  check('confirmed prediction promoted to visible damage',
-    state.visibleDamage.some((d) => d.partId === confirmed.partId));
-
-  heading('oracle: re-run keeps human decisions');
-  await call('POST', `/api/jobs/${job.id}/oracle/predict`, { limit: 8 });
-  state = await call('GET', `/api/jobs/${job.id}`);
-  const stillConfirmed = state.hiddenDamage.find((p) => p.id === confirmed.id);
-  const stillDenied = state.hiddenDamage.find((p) => p.id === denied.id);
-  check('confirmed survives a re-run', stillConfirmed?.confirmed === true);
-  check('denied survives a re-run', stillDenied?.confirmed === false);
-
-  heading('send to customer');
-  const sent = await call('POST', `/api/jobs/${job.id}/send-to-customer`);
-  check('approval link generated', sent.approvalUrl.includes(job.id), sent.approvalUrl);
-  check('line items built', sent.lineItems.length > 0, `${sent.lineItems.length} parts`);
-  check('each part has supply options', sent.lineItems.every((i) => i.options.length >= 1));
-
-  const denialLeaked = sent.lineItems.some((i) => i.partId === denied.partId);
-  check('denied prediction is NOT quoted to the customer', !denialLeaked);
-
-  const hiddenQuoted = sent.lineItems.filter((i) => i.kind === 'hidden');
-  check('confirmed hidden damage IS quoted', hiddenQuoted.length > 0,
-    hiddenQuoted.map((i) => i.displayName).join(', '));
-
-  console.log('    quote:');
-  for (const item of sent.lineItems) {
-    const prices = item.options
-      .map((o) => `${o.label} $${(o.priceCents / 100).toFixed(0)}/${o.etaDays}d`)
-      .join('  |  ');
-    console.log(`      ${item.displayName} (${item.kind})`);
-    console.log(`         ${prices}`);
+    const denied = await call('POST', '/inspection/confirm', {
+      case_id: caseId,
+      part_id: target.part_id,
+      damaged: false,
+    });
+    const everywhere = Object.values(denied.sections).flat();
+    check('ruling a part out removes it', !everywhere.some((l) => l.part_id === target.part_id));
+  } else {
+    check('check section had something to confirm', false, 'nothing in `check`');
   }
 
-  heading('customer approval');
-  const payload = await call('GET', `/api/approve/${job.id}`);
-  check('public page can read the quote', payload.lineItems.length === sent.lineItems.length);
-  check('nothing approved yet', payload.approvedOption === null);
+  console.log('\nparts');
+  const recommendations = await call('GET', `/parts/recommendations?case_id=${caseId}`);
+  check('offers are labelled simulated', recommendations.simulated === true);
+  check(
+    'exactly one offer per line is recommended',
+    recommendations.lines.every((l) => l.offers.filter((o) => o.recommended).length === 1),
+  );
 
-  let rejected = false;
-  try {
-    await call('POST', `/api/approve/${job.id}`, { optionId: 'made-up-option' });
-  } catch {
-    rejected = true;
-  }
-  check('an option that was never offered is rejected', rejected);
+  console.log('\napproval');
+  const sent = await call('POST', `/case/${caseId}/send-to-customer`);
+  check('an approval link is issued', Boolean(sent.token) && sent.approval_url.endsWith(sent.token));
+  check('the link is not the case id', sent.token !== caseId);
 
-  const chosen = payload.lineItems[0].options.find((o) => o.tier === 'aftermarket')
-    ?? payload.lineItems[0].options[0];
-  const approved = await call('POST', `/api/approve/${job.id}`, { optionId: chosen.id });
-  check('customer approval recorded', approved.approvedOption === chosen.id, chosen.label);
-  check('approval is timestamped', Boolean(approved.approvedAt));
-  check('job status is approved', approved.status === 'approved');
+  const approval = await call('GET', `/approve/${sent.token}`);
+  check('the quote loads for the customer', approval.lines.length > 0);
+  check('totals are present', approval.totals.cheapest_nzd > 0);
 
-  heading('dashboard');
-  const jobs = await call('GET', '/api/jobs');
-  const listed = jobs.find((j) => j.id === job.id);
-  check('job appears on the dashboard', Boolean(listed), `${jobs.length} jobs total`);
-  check('dashboard shows final status', listed?.status === 'approved');
+  const optionId = approval.lines[0].options[0].id;
+  const approved = await call('POST', `/approve/${sent.token}`, { option_id: optionId });
+  check('the customer can approve', approved.approved_option === optionId);
+  check('the case moves to approved', approved.status === 'approved');
 
-  heading('error handling');
-  let badVehicle = false;
-  try {
-    await call('POST', '/api/jobs', { vehicleSlug: 'not-a-real-car' });
-  } catch {
-    badVehicle = true;
-  }
-  check('unknown vehicle is rejected', badVehicle);
+  const { cases } = await call('GET', '/cases');
+  check(
+    'the front desk sees it',
+    cases.some((c) => c.case_id === caseId && c.approval_token),
+  );
 
-  let noCatalogue = false;
-  try {
-    const j = await call('POST', '/api/jobs', { vehicleSlug: 'toyota-prius-pkw74' });
-    await call('POST', `/api/jobs/${j.id}/damage`, { partId: 'x', displayName: 'X' });
-    await call('POST', `/api/jobs/${j.id}/oracle/predict`);
-  } catch {
-    noCatalogue = true;
-  }
-  check('oracle refuses a vehicle with no catalogue', noCatalogue);
+  console.log('\nfailures');
+  await expectError('unknown rego 404s', 'rego_not_found', () =>
+    call('POST', '/vehicle/register', { rego: 'ZZZ999' }),
+  );
+  await expectError('unknown case 404s', 'case_not_found', () =>
+    call('GET', '/prediction/results/case_nope'),
+  );
+  await expectError('a bad approval token 404s', 'case_not_found', () =>
+    call('GET', '/approve/not-a-real-token'),
+  );
+
+  const degraded = await startCase(NO_CATALOGUE_REGO);
+  check(
+    'a make-plate-only vehicle still opens a case',
+    degraded.vehicle.status === 'no_catalogue',
+    degraded.vehicle.status,
+  );
+  await expectError('...but cannot be quoted', 'catalogue_unavailable', () =>
+    call('POST', `/case/${degraded.caseId}/send-to-customer`),
+  );
 
   console.log(
-    failures === 0
-      ? '\n[32mAll checks passed.[0m'
-      : `\n[31m${failures} check(s) failed.[0m`,
+    `\n${failed === 0 ? green('all good') : red(`${failed} failed`)} — ` +
+      `${passed} passed, ${failed} failed\n`,
   );
-  process.exit(failures === 0 ? 0 : 1);
+  process.exit(failed === 0 ? 0 : 1);
 }
 
 main().catch((error) => {
-  console.error('\n[31mSmoke test crashed:[0m', error.message);
+  console.error(`\n${red('smoke test could not run')}: ${error.message}`);
+  console.error(dim(`Is the backend running? ${BASE}/healthz`));
   process.exit(1);
 });

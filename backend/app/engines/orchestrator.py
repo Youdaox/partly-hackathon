@@ -34,6 +34,7 @@ def run(
     evidence: Evidence,
     history: History = EMPTY_HISTORY,
     conflicts: list[dict] | None = None,
+    asked: frozenset[str] = frozenset(),
     rank_inspections: bool = True,
 ) -> Report:
     started = time.perf_counter()
@@ -59,7 +60,7 @@ def run(
             candidates, local_edges, evidence, predictions, history
         )
         question = counterfactual.next_question(
-            candidates, local_edges, evidence, predictions, history, conflicts
+            candidates, local_edges, evidence, predictions, history, conflicts, asked
         )
 
     sections = buckets.split(predictions, by_id, inspections)

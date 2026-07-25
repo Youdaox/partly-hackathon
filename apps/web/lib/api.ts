@@ -7,9 +7,10 @@
  * API never has to be publicly reachable.
  */
 
-import type { ApprovalPayload, Job, VehicleSummary } from '@partli/shared';
+import type { ApprovalPayload, CaseListItem } from '@partli/shared';
 
-export const API_URL = (process.env.API_URL ?? 'http://localhost:4000').replace(/\/$/, '');
+export const API_URL = (process.env.API_URL ?? 'http://localhost:8080').replace(/\/$/, '');
+const V1 = `${API_URL}/v1`;
 
 export class ApiError extends Error {
   constructor(
@@ -25,7 +26,7 @@ export class ApiError extends Error {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`${API_URL}${path}`, {
+    response = await fetch(`${V1}${path}`, {
       ...init,
       headers: {
         ...(init?.body ? { 'content-type': 'application/json' } : {}),
@@ -38,7 +39,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(
       0,
       'Cannot reach the API',
-      `Tried ${API_URL}. Is it running? (${
+      `Tried ${V1}. Is it running? (${
         error instanceof Error ? error.message : String(error)
       })`,
     );
@@ -48,10 +49,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const body = text ? JSON.parse(text) : null;
 
   if (!response.ok) {
+    // One error envelope everywhere: { error: { code, message, retryable } }.
+    const envelope = body?.error;
     throw new ApiError(
       response.status,
-      body?.error ?? `Request failed (${response.status})`,
-      body?.detail,
+      envelope?.message ?? `Request failed (${response.status})`,
+      envelope?.code,
     );
   }
 
@@ -59,13 +62,21 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  getApproval: (jobId: string) => request<ApprovalPayload>(`/api/approve/${jobId}`),
+  /**
+   * Approval links are addressed by an unguessable token, not by case id: a
+   * customer receives this URL by text and must not be able to walk it to
+   * someone else's job by editing it.
+   */
+  getApproval: (token: string) => request<ApprovalPayload>(`/approve/${token}`),
 
-  submitApproval: (jobId: string, optionId: string) =>
-    request<ApprovalPayload>(`/api/approve/${jobId}`, {
+  submitApproval: (token: string, optionId: string) =>
+    request<ApprovalPayload>(`/approve/${token}`, {
       method: 'POST',
-      body: JSON.stringify({ optionId }),
+      body: JSON.stringify({ option_id: optionId }),
     }),
 
-  listJobs: () => request<Array<Job & { vehicle: VehicleSummary }>>('/api/jobs'),
+  listCases: async (): Promise<CaseListItem[]> => {
+    const body = await request<{ cases: CaseListItem[] }>('/cases');
+    return body.cases;
+  },
 };

@@ -9,7 +9,7 @@ import { useCallback, useState } from 'react';
 import { Platform, Pressable, ScrollView, Share, StyleSheet, View } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import QRCode from 'react-native-qrcode-svg';
-import { formatPrice } from '@partli/shared';
+import { formatLeadTime, formatPrice } from '@partli/shared';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -20,11 +20,11 @@ import { useTheme } from '@/hooks/use-theme';
 import { api } from '@/lib/api';
 
 export default function SendToCustomerScreen() {
-  const { id: jobId } = useLocalSearchParams<{ id: string }>();
+  const { id: caseId } = useLocalSearchParams<{ id: string }>();
   const theme = useTheme();
 
   // Sending on mount is the point of this screen — there is nothing to configure.
-  const quote = useAsyncData(() => api.sendToCustomer(jobId), [jobId]);
+  const quote = useAsyncData(() => api.sendToCustomer(caseId), [caseId]);
 
   const [resending, setResending] = useState(false);
   const [actionError, setActionError] = useState<{ title: string; detail?: string } | null>(null);
@@ -33,19 +33,19 @@ export default function SendToCustomerScreen() {
     setResending(true);
     setActionError(null);
     try {
-      quote.setData(await api.sendToCustomer(jobId));
+      quote.setData(await api.sendToCustomer(caseId));
     } catch (err) {
       setActionError(toErrorInfo(err));
     } finally {
       setResending(false);
     }
-  }, [jobId, quote]);
+  }, [caseId, quote]);
 
   const share = useCallback(async () => {
     if (!quote.data) return;
     await Share.share({
-      message: `Your repair options are ready: ${quote.data.approvalUrl}`,
-      url: quote.data.approvalUrl,
+      message: `Your repair options are ready: ${quote.data.approval_url}`,
+      url: quote.data.approval_url,
     });
   }, [quote.data]);
 
@@ -74,10 +74,11 @@ export default function SendToCustomerScreen() {
   const result = quote.data;
   const error = actionError ?? quote.error;
 
-  const total = result.lineItems.reduce((sum, item) => {
+  const total = result.lines.reduce((sum, item) => {
     // Show the cheapest option per part, since that is what an unsure customer sees first.
-    const cheapest = Math.min(...item.options.map((option) => option.priceCents));
-    return sum + cheapest;
+    if (item.options.length === 0) return sum;
+    const cheapest = Math.min(...item.options.map((option) => option.price_nzd));
+    return sum + cheapest * item.qty;
   }, 0);
 
   return (
@@ -90,12 +91,12 @@ export default function SendToCustomerScreen() {
           <View style={styles.qrWrapper}>
             {/* QR renders on a white square so it scans reliably in dark mode. */}
             <View style={styles.qrSurface}>
-              <QRCode value={result.approvalUrl} size={200} backgroundColor="#ffffff" />
+              <QRCode value={result.approval_url} size={200} backgroundColor="#ffffff" />
             </View>
           </View>
           <Pressable onPress={share} accessibilityRole="button">
             <ThemedText type="small" style={{ color: theme.accent }}>
-              {result.approvalUrl}
+              {result.approval_url}
             </ThemedText>
           </Pressable>
           <Button
@@ -108,16 +109,17 @@ export default function SendToCustomerScreen() {
 
         <View style={styles.sectionHeader}>
           <ThemedText type="smallBold">Quote</ThemedText>
-          <Pill label={`${result.lineItems.length} parts`} tone="accent" />
+          <Pill label={`${result.lines.length} parts`} tone="accent" />
         </View>
 
-        {result.lineItems.map((item) => (
-          <Card key={item.partId} style={styles.card}>
+        {result.lines.map((item) => (
+          <Card key={item.part_id} style={styles.card}>
             <View style={styles.itemHeader}>
               <ThemedText type="smallBold" style={styles.itemName}>
-                {item.displayName}
+                {item.qty > 1 ? `${item.qty}\u00d7 ` : ''}
+                {item.display_name}
               </ThemedText>
-              {item.kind === 'hidden' ? <Pill label="Hidden" tone="success" /> : null}
+              {item.kind === 'hidden' ? <Pill label="Predicted" tone="success" /> : null}
             </View>
             {item.options.map((option) => (
               <View key={option.id} style={styles.optionRow}>
@@ -125,7 +127,8 @@ export default function SendToCustomerScreen() {
                   {option.label}
                 </ThemedText>
                 <ThemedText type="small">
-                  {formatPrice(option.priceCents, option.currency)} · {option.etaDays}d
+                  {formatPrice(option.price_nzd)} · {formatLeadTime(option.lead_days)}
+                  {option.in_stock ? '' : ' · backorder'}
                 </ThemedText>
               </View>
             ))}
@@ -138,7 +141,7 @@ export default function SendToCustomerScreen() {
             <ThemedText type="smallBold">{formatPrice(total)}</ThemedText>
           </View>
           <ThemedText type="small" themeColor="textSecondary">
-            Placeholder pricing — no supplier data ships with the hackathon dataset.
+            Simulated pricing — the dataset ships no price, stock or supplier data.
           </ThemedText>
         </Card>
 

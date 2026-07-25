@@ -25,6 +25,10 @@ class Settings(BaseSettings):
 
     engine_version: str = "graph-1.0.0"
 
+    # Where the approval page is served from. Must be reachable from the
+    # customer's phone, not just from this machine.
+    web_base_url: str = "http://localhost:3000"
+
     @property
     def vehicles_dir(self) -> Path:
         return self.data_dir / "vehicles"

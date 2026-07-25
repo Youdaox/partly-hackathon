@@ -101,10 +101,22 @@ class Case:
     observations: list[Observation] = field(default_factory=list)
     confirmations: dict[str, bool] = field(default_factory=dict)
     conflicts: list[dict] = field(default_factory=list)
+    # Klasses the repairer mentioned but was explicitly unsure about (spec 8.3),
+    # mapped to the message that raised them. Worth asking about before anything
+    # the graph merely inferred — and retractable when that message is edited.
+    question_candidates: dict[str, str | None] = field(default_factory=dict)
+    # Questions already answered this case — never re-asked (spec 9.5).
+    questions_asked: set[str] = field(default_factory=set)
     impact_evidence: list[str] = field(default_factory=list)
     impact_confidence: float = 0.0
     last_report: dict[str, Any] | None = None
     order: dict[str, Any] | None = None
+    # Customer approval. The token addresses the case from a public link, so it
+    # is unguessable and is never the case id.
+    approval_token: str | None = None
+    approval_lines: list[dict] = field(default_factory=list)
+    approved_option: str | None = None
+    approved_at: float | None = None
     analysing: set[str] = field(default_factory=set)
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
@@ -149,6 +161,19 @@ def get_case(case_id: str) -> Case | None:
     _expire()
     with _lock:
         return _cases.get(case_id)
+
+
+def recent_cases(limit: int = 50) -> list[Case]:
+    _expire()
+    with _lock:
+        ordered = sorted(_cases.values(), key=lambda c: c.updated_at, reverse=True)
+    return ordered[:limit]
+
+
+def case_by_approval_token(token: str) -> Case | None:
+    _expire()
+    with _lock:
+        return next((c for c in _cases.values() if c.approval_token == token), None)
 
 
 def touch(case: Case) -> None:

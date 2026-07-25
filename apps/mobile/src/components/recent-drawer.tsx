@@ -9,7 +9,7 @@ import { useCallback, useEffect } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import type { Job, JobStatus, VehicleSummary } from '@partli/shared';
+import { relativeTime, type CaseListItem, type CaseStatus } from '@partli/shared';
 
 import { ThemedText } from '@/components/themed-text';
 import { ErrorNotice, Loading, SectionLabel } from '@/components/ui';
@@ -18,41 +18,26 @@ import { useAsyncData } from '@/hooks/use-async-data';
 import { useTheme } from '@/hooks/use-theme';
 import { api } from '@/lib/api';
 
-/** What the job has got to, in the repairer's words rather than the schema's. */
-const STATUS_LABEL: Record<JobStatus, string> = {
-  capturing: 'in progress',
-  predicted: 'hidden damage ranked',
+/** What the case has got to, in the repairer's words rather than the schema's. */
+const STATUS_LABEL: Record<CaseStatus, string> = {
+  open: 'just started',
+  analysing: 'analysing',
+  ready: 'hidden damage ranked',
+  ordered: 'parts ordered',
   sent_to_customer: 'sent to customer',
   approved: 'approved',
+  closed: 'closed',
 };
 
-/**
- * `Today, 2:14 PM` · `Yesterday` · `Mon` · `12 Jul`, matching the mockup.
- */
-function relativeTime(iso: string): string {
-  const then = new Date(iso);
-  if (Number.isNaN(then.getTime())) return '';
-
-  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  const days = Math.round((startOfDay(new Date()) - startOfDay(then)) / 86_400_000);
-
-  if (days <= 0) {
-    return `Today, ${then.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
-  }
-  if (days === 1) return 'Yesterday';
-  if (days < 7) return then.toLocaleDateString(undefined, { weekday: 'short' });
-  return then.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
-}
-
-function vehicleName(vehicle: VehicleSummary | null | undefined, fallback: string): string {
-  if (!vehicle) return fallback;
-  return [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(' ');
+function vehicleName(vehicle: CaseListItem['vehicle'], fallback: string): string {
+  const named = [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(' ');
+  return named || vehicle.rego || fallback;
 }
 
 export function RecentDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
   const theme = useTheme();
   const router = useRouter();
-  const jobs = useAsyncData(() => api.listJobs(), []);
+  const jobs = useAsyncData(() => api.listCases(), []);
 
   useEffect(() => {
     if (open) void jobs.reload();
@@ -61,9 +46,9 @@ export function RecentDrawer({ open, onClose }: { open: boolean; onClose: () => 
   }, [open]);
 
   const openJob = useCallback(
-    (job: Job) => {
+    (item: CaseListItem) => {
       onClose();
-      router.push({ pathname: '/job/[id]/hidden', params: { id: job.id } });
+      router.push({ pathname: '/job/[id]/hidden', params: { id: item.case_id } });
     },
     [onClose, router],
   );
@@ -105,7 +90,7 @@ export function RecentDrawer({ open, onClose }: { open: boolean; onClose: () => 
 
             {(jobs.data ?? []).map((job) => (
               <Pressable
-                key={job.id}
+                key={job.case_id}
                 accessibilityRole="button"
                 onPress={() => openJob(job)}
                 style={({ pressed }) => [
@@ -116,10 +101,10 @@ export function RecentDrawer({ open, onClose }: { open: boolean; onClose: () => 
                 <Ionicons name="car-outline" size={20} color={theme.iconMuted} style={styles.rowIcon} />
                 <View style={styles.rowText}>
                   <ThemedText numberOfLines={1}>
-                    {vehicleName(job.vehicle, job.vehicleSlug)} — {STATUS_LABEL[job.status]}
+                    {vehicleName(job.vehicle, job.case_id)} — {STATUS_LABEL[job.status]}
                   </ThemedText>
                   <ThemedText type="small" themeColor="textSecondary">
-                    {relativeTime(job.createdAt)}
+                    {relativeTime(job.created_at)}
                   </ThemedText>
                 </View>
               </Pressable>

@@ -7,20 +7,19 @@
     "node": ">=20"
   },
   "scripts": {
-    "dev": "turbo run dev --filter=@partli/api --filter=@partli/web",
+    "dev": "turbo run dev --filter=@partli/web",
     "dev:shared": "pnpm --filter @partli/shared dev",
+    "api": "backend/.venv/bin/uvicorn app.main:app --port 8080 --app-dir backend",
+    "api:install": "python3 -m venv backend/.venv && backend/.venv/bin/pip install -e 'backend[dev]'",
+    "api:test": "backend/.venv/bin/python -m pytest backend/tests -q",
+    "api:warm": "cd backend && .venv/bin/python -m scripts.warm_cache",
     "mobile": "pnpm --filter @partli/mobile start",
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
     "lint": "turbo run lint",
     "test": "turbo run test",
     "smoke": "node scripts/smoke.mjs",
-    "seed": "pnpm --filter @partli/api seed",
-    "clean": "turbo run clean && rm -rf node_modules",
-    "db:up": "docker compose up -d postgres",
-    "db:down": "docker compose down",
-    "db:logs": "docker compose logs -f postgres",
-    "db:reset": "docker compose down -v && docker compose up -d postgres"
+    "clean": "turbo run clean && rm -rf node_modules"
   },
   "devDependencies": {
     "turbo": "^2.5.8",

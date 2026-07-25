@@ -1,12 +1,22 @@
 """Where damage can physically have reached, and whether a part is in its way.
 
-Two gates, both pure functions of the part and the impact descriptor:
+Scope, stated honestly (spec 9.3): this is not a crash simulator, and nobody can
+estimate velocity from a photograph. What it encodes is **structural ordering** —
+a front end is engineered as a sequenced collapse (cover → absorber → beam →
+crash box → rail → firewall), each stage designed to fail before the next. That
+ordering is a design fact, stable across manufacturers, and it maps onto the
+depth index in tables.depth_map.
 
-  depth_gate  did a collision of this severity get down to this layer at all
-  zone_factor is this part in the corner that was hit
+Two pure functions of the part and the impact descriptor:
 
-They are separate because they fail differently. A part can be shallow but on
-the wrong side, or correctly located but far deeper than the impact reached.
+  depth_gate   could energy have reached this layer at all
+  zone_factor  is this part in the corner that was hit
+
+`depth_gate` belongs to the *target* part and multiplies every cause acting on
+it — the direct term and every incoming edge (spec 9.3). `zone_factor`
+multiplies only the direct term: left/right asymmetry needs no rule on the
+edges, because the only route across the car is a transverse member, modelled
+explicitly as a centre part.
 """
 
 from __future__ import annotations
@@ -24,40 +34,37 @@ def reach_for(severity: int) -> float:
 
 
 def depth_gate(depth: int, severity: int) -> float:
-    """Soft cutoff on depth.
+    """Soft cutoff on depth: damage cannot appear at depth d unless energy
+    reached depth d, regardless of what is destroyed in front of it.
 
     A sigmoid rather than a hard threshold because severity is itself an
-    estimate: a severity-3 hit does not stop dead at depth 3, it becomes
-    progressively less likely to have gone further.
+    estimate. Gating only the direct term is a real bug (spec 9.3): observed
+    parts clamp near 0.98 whatever the severity, so an ungated edge propagates
+    a car-park scrape inward at full strength — 53% crash box at severity 1.
     """
     reach = reach_for(severity)
     return 1.0 / (1.0 + math.exp(-(reach - depth) / SIGMOID_WIDTH))
 
 
 def zone_factor(part: Part, impact_zone: str, impact_side: str) -> float:
-    """How much a part's location agrees with where the vehicle was hit."""
-    if part.zone == "other" or not part.zone:
-        return ZONE_FACTOR["unknown"]
+    """How much a part's location supports *direct* impact damage (spec 9.3).
 
-    if part.zone != impact_zone:
-        return ZONE_FACTOR["zone_mismatch"]
+    Returns 0.0 for parts outside the impact zone entirely — they can still be
+    reached through edges, just never directly.
+    """
+    if part.zone != impact_zone or not part.zone or part.zone == "other":
+        # front vs rear are not adjacent; we tag no adjacent zones today, so
+        # anything outside the impact zone is elsewhere.
+        return ZONE_FACTOR["elsewhere"]
 
-    # Right zone. Now the side.
-    if impact_side in ("both", "C", ""):
-        return ZONE_FACTOR["match"]
-
-    if part.side == "C" or part.klass in CENTRELINE_KLASSES:
+    centred = part.side == "C" or part.klass in CENTRELINE_KLASSES
+    if centred:
         return ZONE_FACTOR["centre"]
 
-    if part.side == impact_side:
-        return ZONE_FACTOR["match"]
+    if impact_side in ("both", "C", ""):
+        return ZONE_FACTOR["same_side"]
 
-    return ZONE_FACTOR["side_mismatch"]
-
-
-def gate_for(part: Part, evidence_zone: str, evidence_side: str, severity: int) -> float:
-    """Combined location gate. Applied to a part's whole probability."""
-    return zone_factor(part, evidence_zone, evidence_side)
+    return ZONE_FACTOR["same_side"] if part.side == impact_side else ZONE_FACTOR["other_side"]
 
 
 def accessible(part: Part, exposed_depth: int, margin: int) -> bool:

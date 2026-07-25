@@ -3,7 +3,7 @@
 import { useActionState, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Check, Clock, ShieldCheck } from 'lucide-react';
-import { formatPrice, type ApprovalLineItem } from '@partli/shared';
+import { formatLeadTime, formatPrice, type ApprovalLine } from '@partli/shared';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -12,8 +12,8 @@ import { cn } from '@/lib/utils';
 import { approveOption, type ApproveState } from './actions';
 
 interface ApprovalFormProps {
-  jobId: string;
-  lineItems: ApprovalLineItem[];
+  token: string;
+  lines: ApprovalLine[];
   approvedOption: string | null;
 }
 
@@ -32,7 +32,7 @@ function SubmitButton({ selected }: { selected: boolean }) {
   );
 }
 
-export function ApprovalForm({ jobId, lineItems, approvedOption }: ApprovalFormProps) {
+export function ApprovalForm({ token, lines, approvedOption }: ApprovalFormProps) {
   const [state, formAction] = useActionState<ApproveState, FormData>(approveOption, {
     error: null,
   });
@@ -41,24 +41,22 @@ export function ApprovalForm({ jobId, lineItems, approvedOption }: ApprovalFormP
   // tier once and it applies to the whole quote.
   const tiers = Array.from(
     new Map(
-      lineItems
-        .flatMap((item) => item.options)
-        .map((option) => [option.tier, option] as const),
+      lines.flatMap((item) => item.options).map((option) => [option.tier, option] as const),
     ).values(),
   );
 
   const [selectedTier, setSelectedTier] = useState<string | null>(null);
 
   const totalFor = (tier: string) =>
-    lineItems.reduce((sum, item) => {
+    lines.reduce((sum, item) => {
       const match = item.options.find((option) => option.tier === tier) ?? item.options[0];
-      return sum + (match?.priceCents ?? 0);
+      return sum + (match?.price_nzd ?? 0) * item.qty;
     }, 0);
 
   const longestEta = (tier: string) =>
-    lineItems.reduce((max, item) => {
+    lines.reduce((max, item) => {
       const match = item.options.find((option) => option.tier === tier) ?? item.options[0];
-      return Math.max(max, match?.etaDays ?? 0);
+      return Math.max(max, match?.lead_days ?? 0);
     }, 0);
 
   /**
@@ -66,12 +64,12 @@ export function ApprovalForm({ jobId, lineItems, approvedOption }: ApprovalFormP
    * of the selected tier's option on the first line item.
    */
   const selectedOptionId = selectedTier
-    ? (lineItems[0]?.options.find((option) => option.tier === selectedTier)?.id ?? null)
+    ? (lines[0]?.options.find((option) => option.tier === selectedTier)?.id ?? null)
     : null;
 
   return (
     <form action={formAction} className="space-y-4">
-      <input type="hidden" name="jobId" value={jobId} />
+      <input type="hidden" name="token" value={token} />
       <input type="hidden" name="optionId" value={selectedOptionId ?? ''} />
 
       <fieldset className="space-y-3" disabled={Boolean(approvedOption)}>
@@ -110,19 +108,19 @@ export function ApprovalForm({ jobId, lineItems, approvedOption }: ApprovalFormP
                   <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
                     <span className="inline-flex items-center gap-1">
                       <Clock className="size-3.5" aria-hidden />
-                      Ready in about {eta} days
+                      Ready in about {formatLeadTime(eta)}
                     </span>
                     <span className="inline-flex items-center gap-1">
                       <ShieldCheck className="size-3.5" aria-hidden />
-                      {option.warranty} warranty
+                      {option.tier === 'oem' ? 'Manufacturer warranty' : 'Supplier warranty'}
                     </span>
                   </div>
                 </div>
                 <div className="shrink-0 text-right">
                   <div className="text-lg font-semibold tabular-nums">
-                    {formatPrice(total, option.currency)}
+                    {formatPrice(total)}
                   </div>
-                  <div className="text-xs text-muted-foreground">for {lineItems.length} parts</div>
+                  <div className="text-xs text-muted-foreground">for {lines.length} parts</div>
                 </div>
               </div>
             </label>
@@ -141,18 +139,21 @@ export function ApprovalForm({ jobId, lineItems, approvedOption }: ApprovalFormP
       {/* Per-part breakdown, collapsed by default so the choice stays the focus. */}
       <details className="pt-2">
         <summary className="cursor-pointer text-sm text-muted-foreground hover:text-foreground">
-          See the {lineItems.length} parts in this quote
+          See the {lines.length} parts in this quote
         </summary>
         <Card className="mt-3">
           <CardHeader className="pb-3">
             <CardTitle className="text-sm">Parts breakdown</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            {lineItems.map((item) => (
-              <div key={item.partId} className="flex items-start justify-between gap-3 text-sm">
+            {lines.map((item) => (
+              <div key={item.part_id} className="flex items-start justify-between gap-3 text-sm">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="truncate">{item.displayName}</span>
+                    <span className="truncate">
+                      {item.qty > 1 ? `${item.qty}\u00d7 ` : ''}
+                      {item.display_name}
+                    </span>
                     {item.kind === 'hidden' ? (
                       <Badge variant="success" className="shrink-0">
                         Found by Partli
@@ -163,8 +164,8 @@ export function ApprovalForm({ jobId, lineItems, approvedOption }: ApprovalFormP
                 <span className="shrink-0 tabular-nums text-muted-foreground">
                   {selectedTier
                     ? formatPrice(
-                        (item.options.find((o) => o.tier === selectedTier) ?? item.options[0])
-                          ?.priceCents ?? 0,
+                        ((item.options.find((o) => o.tier === selectedTier) ?? item.options[0])
+                          ?.price_nzd ?? 0) * item.qty,
                       )
                     : '—'}
                 </span>

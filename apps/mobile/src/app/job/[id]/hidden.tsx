@@ -1,13 +1,19 @@
 /**
  * Screen 3 — diagnosis.
  *
- * Ranked predictions from the proximity-graph oracle: where they land on the vehicle,
- * then the list itself, each row carrying a match score and one line of plain English.
- * ✓ / ✗ calls /oracle/confirm, which pins the stored confidence to 1 or 0 and (on ✓)
- * promotes the part onto the visible damage list.
+ * The report, in the three sections the backend buckets it into: what is visibly
+ * damaged, what to order now, and what is worth walking over to check.
  *
- * The follow-up box at the bottom is the same capture loop as screen 2: whatever the
- * repairer adds becomes visible damage, then the oracle re-scores against it.
+ * Two things drive the interaction:
+ *
+ * - ✓ / ✗ on a `check` row calls /inspection/confirm, which returns a *complete
+ *   replacement report*. There is no patching: the whole view swaps. That round
+ *   trip is budgeted under 150 ms and touches no model, so it feels instant.
+ * - The assistant asks at most one question at a time, ranked by how much the
+ *   answer moves the report. Answering it also returns a full report.
+ *
+ * The follow-up box is the same capture loop as screen 2: whatever the repairer
+ * adds becomes evidence, and everything is recomputed from scratch against it.
  */
 
 import { useCallback, useMemo, useState } from 'react';
@@ -22,7 +28,7 @@ import {
 } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import type { HiddenDamagePrediction, JobState } from '@partli/shared';
+import { formatProbability, type DamageReport, type ReportLine } from '@partli/shared';
 
 import { Framed } from '@/components/framed';
 import { ThemedText } from '@/components/themed-text';
@@ -43,118 +49,99 @@ import { useTheme } from '@/hooks/use-theme';
 import { api } from '@/lib/api';
 import { zoneForPart } from '@/lib/zones';
 
-/**
- * Load the job, and run the oracle straight away if it has not produced anything yet.
- * The repairer already pressed a button to get here, so make them press one fewer.
- */
-async function loadWithPredictions(jobId: string): Promise<JobState> {
-  const state = await api.getJob(jobId);
-  if (state.hiddenDamage.length > 0 || state.visibleDamage.length === 0) return state;
-
-  await api.predictHiddenDamage(jobId, 10);
-  return api.getJob(jobId);
-}
-
 export default function DiagnosisScreen() {
-  const {
-    id: jobId,
-    said,
-    draft,
-  } = useLocalSearchParams<{ id: string; said?: string; draft?: string }>();
+  const { id: caseId, said } = useLocalSearchParams<{ id: string; said?: string }>();
   const router = useRouter();
   const theme = useTheme();
 
-  const job = useAsyncData(() => loadWithPredictions(jobId), [jobId]);
+  const report = useAsyncData(() => api.getReport(caseId), [caseId]);
 
-  const [predicting, setPredicting] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
-  // `draft` is wording the entry screen could not match to a catalogue part. It arrives
-  // pre-loaded in the follow-up box so the repairer can reword it instead of retyping.
-  const [followUp, setFollowUp] = useState(draft ?? '');
+  const [followUp, setFollowUp] = useState('');
   const [asking, setAsking] = useState(false);
+  const [answering, setAnswering] = useState(false);
   const [actionError, setActionError] = useState<{ title: string; detail?: string } | null>(null);
 
-  const runOracle = useCallback(async () => {
-    setPredicting(true);
-    setActionError(null);
-    try {
-      await api.predictHiddenDamage(jobId, 10);
-      await job.reload();
-    } catch (err) {
-      setActionError(toErrorInfo(err));
-    } finally {
-      setPredicting(false);
-    }
-  }, [jobId, job]);
+  const state: DamageReport | null = report.data ?? null;
 
-  const answer = useCallback(
-    async (prediction: HiddenDamagePrediction, confirmed: boolean) => {
-      setBusyId(prediction.id);
+  /** Every mutating call returns the whole report, so we swap rather than reload. */
+  const swap = useCallback(
+    (next: DamageReport) => {
+      report.setData(next);
       setActionError(null);
+    },
+    [report],
+  );
+
+  const confirm = useCallback(
+    async (line: ReportLine, damaged: boolean) => {
+      setBusyId(line.part_id);
       try {
-        await api.confirmHiddenDamage(jobId, prediction.id, confirmed);
-        await job.reload();
+        swap(await api.confirm(caseId, line.part_id, damaged));
       } catch (err) {
         setActionError(toErrorInfo(err));
       } finally {
         setBusyId(null);
       }
     },
-    [jobId, job],
+    [caseId, swap],
   );
 
-  /** A follow-up is just more damage: record it, then re-score against it. */
+  const answerQuestion = useCallback(
+    async (questionId: string, value: string) => {
+      setAnswering(true);
+      try {
+        swap(await api.answer(caseId, questionId, value));
+      } catch (err) {
+        setActionError(toErrorInfo(err));
+      } finally {
+        setAnswering(false);
+      }
+    },
+    [caseId, swap],
+  );
+
+  /** A follow-up is just more evidence: send it, and the report recomputes. */
   const askFollowUp = useCallback(async () => {
     const text = followUp.trim();
     if (!text || asking) return;
 
     setAsking(true);
-    setActionError(null);
     try {
-      await api.addDamage(jobId, text, 'voice');
-      await api.predictHiddenDamage(jobId, 10);
-      await job.reload();
+      await api.sendMessage(caseId, text);
+      swap(await api.getReport(caseId));
       setFollowUp('');
     } catch (err) {
       setActionError(toErrorInfo(err));
     } finally {
       setAsking(false);
     }
-  }, [followUp, asking, jobId, job]);
+  }, [followUp, asking, caseId, swap]);
 
-  const state = job.data;
-  const unreviewed = useMemo(
-    () => (state?.hiddenDamage ?? []).filter((p) => p.confirmed === null),
-    [state],
-  );
-  const reviewed = useMemo(
-    () => (state?.hiddenDamage ?? []).filter((p) => p.confirmed !== null),
-    [state],
-  );
+  const sections = state?.sections;
+  const check = useMemo(() => sections?.check ?? [], [sections]);
+  const order = useMemo(() => sections?.order ?? [], [sections]);
+  const visible = useMemo(() => sections?.visible ?? [], [sections]);
 
   /**
-   * Markers for the silhouette. Predictions carry a part name but not their diagram, so
-   * a part whose name gives no position away simply gets no marker — see `lib/zones.ts`.
+   * Markers for the silhouette. A part whose name gives no position away simply
+   * gets no marker — see `lib/zones.ts`.
    */
   const markers = useMemo<ZoneMarker[]>(
     () =>
-      unreviewed
-        .map((p, i) => ({ n: i + 1, zone: zoneForPart(p.displayName) }))
+      check
+        .map((line, i) => ({ n: i + 1, zone: zoneForPart(line.name) }))
         .filter((m): m is ZoneMarker => m.zone !== null),
-    [unreviewed],
+    [check],
   );
 
   const vehicleTitle = state?.vehicle
-    ? [state.vehicle.year, state.vehicle.make, state.vehicle.model].filter(Boolean).join(' ')
+    ? [state.vehicle.year, state.vehicle.make, state.vehicle.model].filter(Boolean).join(' ') ||
+      state.vehicle.rego
     : 'Diagnosis';
 
-  /** The repairer's own words if the previous screen passed them, else what was captured. */
-  const saidText =
-    said ??
-    (state?.visibleDamage ?? [])
-      .filter((d) => d.source !== 'prediction')
-      .map((d) => d.displayName)
-      .join(', ');
+  /** The repairer's own words if the entry screen passed them, else what we can see. */
+  const saidText = said ?? visible.map((line) => line.name).slice(0, 4).join(', ');
 
   const header = (
     <Stack.Screen
@@ -164,31 +151,31 @@ export default function DiagnosisScreen() {
           <View style={styles.headerTitle}>
             <ThemedText type="rowTitle">{vehicleTitle}</ThemedText>
             <ThemedText type="small" themeColor="textSecondary">
-              Diagnosis
+              {state ? `${state.impact.zone} ${sideLabel(state.impact.side)}` : 'Diagnosis'}
             </ThemedText>
           </View>
         ),
         headerRight: () => (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Re-run predictions"
-            onPress={runOracle}
+            accessibilityLabel="Refresh the report"
+            onPress={() => void report.reload()}
             hitSlop={12}
             style={styles.headerButton}
           >
-            <Ionicons name="ellipsis-horizontal" size={22} color={theme.accent} />
+            <Ionicons name="refresh" size={20} color={theme.accent} />
           </Pressable>
         ),
       }}
     />
   );
 
-  if (job.loading) {
+  if (report.loading) {
     return (
       <>
         {header}
         <ThemedView style={styles.container}>
-          <Loading label="Scoring the proximity graph…" />
+          <Loading label="Propagating through the component graph…" />
         </ThemedView>
       </>
     );
@@ -200,14 +187,14 @@ export default function DiagnosisScreen() {
         {header}
         <ThemedView style={styles.container}>
           <View style={styles.padded}>
-            <ErrorNotice title={job.error?.title ?? 'Job not found'} detail={job.error?.detail} />
+            <ErrorNotice title={report.error?.title ?? 'Case not found'} detail={report.error?.detail} />
           </View>
         </ThemedView>
       </>
     );
   }
 
-  const error = actionError ?? job.error;
+  const error = actionError ?? report.error;
 
   return (
     <>
@@ -230,6 +217,14 @@ export default function DiagnosisScreen() {
               </View>
             ) : null}
 
+            {/* No OEM catalogue: say so rather than showing a thin report as if it were complete. */}
+            {state.degraded ? (
+              <ErrorNotice
+                title="No parts catalogue for this vehicle"
+                detail="Predictions are class-level only — part numbers are not available."
+              />
+            ) : null}
+
             <Framed style={styles.zonesCard}>
               <SectionLabel>AFFECTED ZONES</SectionLabel>
               <VehicleZones markers={markers} />
@@ -237,27 +232,67 @@ export default function DiagnosisScreen() {
 
             {error ? <ErrorNotice title={error.title} detail={error.detail} /> : null}
 
-            <ThemedText type="section">Likely related parts</ThemedText>
-
-            {predicting ? <Loading label="Re-scoring…" /> : null}
-
-            {!predicting && state.hiddenDamage.length === 0 ? (
-              <EmptyState message="No predictions yet. Describe more damage, or re-run from the header." />
+            {/* One question at a time, whichever moves the report most. */}
+            {state.question ? (
+              <Framed style={styles.question}>
+                <SectionLabel>
+                  {state.question.source === 'repairer' ? 'YOU RAISED THIS' : 'ONE QUESTION'}
+                </SectionLabel>
+                <ThemedText type="rowTitle">{state.question.text}</ThemedText>
+                <View style={styles.questionRow}>
+                  {state.question.options.map((option) => (
+                    <Pressable
+                      key={option}
+                      accessibilityRole="button"
+                      disabled={answering}
+                      onPress={() => answerQuestion(state.question!.id, option)}
+                      style={({ pressed }) => [
+                        styles.questionButton,
+                        { borderColor: theme.accent, opacity: pressed || answering ? 0.6 : 1 },
+                      ]}
+                    >
+                      <ThemedText type="smallBold" style={{ color: theme.accent }}>
+                        {option}
+                      </ThemedText>
+                    </Pressable>
+                  ))}
+                </View>
+              </Framed>
             ) : null}
 
-            {unreviewed.map((prediction, i) => (
-              <Framed key={prediction.id} style={styles.row}>
+            {/* --- worth checking ------------------------------------------ */}
+            <ThemedText type="section">Worth checking</ThemedText>
+
+            {check.length === 0 ? (
+              <EmptyState message="Nothing uncertain left. Everything else is either confirmed or ruled out." />
+            ) : null}
+
+            {check.map((line, i) => (
+              <Framed key={line.part_id} style={styles.row}>
                 <View style={styles.rowHead}>
                   <NumberBadge n={i + 1} />
                   <ThemedText type="rowTitle" style={styles.rowName}>
-                    {prediction.displayName}
+                    {line.name}
                   </ThemedText>
-                  <MatchBadge value={prediction.confidenceScore} />
+                  <MatchBadge value={line.p} />
                 </View>
 
-                {prediction.reason ? (
+                {line.reason ? (
                   <ThemedText type="small" themeColor="textSecondary">
-                    {prediction.reason}
+                    {line.reason}
+                  </ThemedText>
+                ) : null}
+
+                {/* Why the graph thinks so — the top cause is usually enough. */}
+                {line.attribution?.length ? (
+                  <ThemedText type="small" themeColor="textSecondary">
+                    mostly from {line.attribution[0]!.cause} ({line.attribution[0]!.relation})
+                  </ThemedText>
+                ) : null}
+
+                {line.accessible === false ? (
+                  <ThemedText type="small" themeColor="textSecondary">
+                    Needs more teardown to reach.
                   </ThemedText>
                 ) : null}
 
@@ -265,9 +300,9 @@ export default function DiagnosisScreen() {
                 <View style={styles.answerRow}>
                   <Pressable
                     accessibilityRole="button"
-                    accessibilityLabel={`Confirm ${prediction.displayName} is damaged`}
-                    disabled={busyId === prediction.id}
-                    onPress={() => answer(prediction, true)}
+                    accessibilityLabel={`Confirm ${line.name} is damaged`}
+                    disabled={busyId === line.part_id}
+                    onPress={() => confirm(line, true)}
                     style={({ pressed }) => [
                       styles.answerButton,
                       { borderColor: theme.success, opacity: pressed ? 0.6 : 1 },
@@ -281,9 +316,9 @@ export default function DiagnosisScreen() {
 
                   <Pressable
                     accessibilityRole="button"
-                    accessibilityLabel={`Rule out ${prediction.displayName}`}
-                    disabled={busyId === prediction.id}
-                    onPress={() => answer(prediction, false)}
+                    accessibilityLabel={`Rule out ${line.name}`}
+                    disabled={busyId === line.part_id}
+                    onPress={() => confirm(line, false)}
                     style={({ pressed }) => [
                       styles.answerButton,
                       { borderColor: theme.border, opacity: pressed ? 0.6 : 1 },
@@ -298,46 +333,69 @@ export default function DiagnosisScreen() {
               </Framed>
             ))}
 
-            {reviewed.length > 0 ? (
-              <View style={styles.reviewedHeader}>
-                <SectionLabel>REVIEWED</SectionLabel>
-              </View>
+            {/* --- order now ----------------------------------------------- */}
+            {order.length > 0 ? (
+              <>
+                <View style={styles.reviewedHeader}>
+                  <SectionLabel>ORDER THESE TOO</SectionLabel>
+                </View>
+                {order.map((line) => (
+                  <View key={line.part_id} style={styles.reviewedRow}>
+                    <Ionicons name="cart-outline" size={18} color={theme.accent} />
+                    <View style={styles.reviewedName}>
+                      <ThemedText type="small" numberOfLines={1}>
+                        {line.qty > 1 ? `${line.qty}× ` : ''}
+                        {line.name}
+                      </ThemedText>
+                      {line.reason ? (
+                        <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
+                          {line.reason}
+                        </ThemedText>
+                      ) : null}
+                    </View>
+                    <ThemedText type="small" themeColor="textSecondary">
+                      {formatProbability(line.p)}
+                    </ThemedText>
+                  </View>
+                ))}
+              </>
             ) : null}
 
-            {reviewed.map((prediction) => (
-              <View key={prediction.id} style={styles.reviewedRow}>
-                <Ionicons
-                  name={prediction.confirmed ? 'checkmark-circle' : 'close-circle-outline'}
-                  size={18}
-                  color={prediction.confirmed ? theme.success : theme.textSecondary}
-                />
-                <ThemedText type="small" style={styles.reviewedName} numberOfLines={1}>
-                  {prediction.displayName}
-                </ThemedText>
-                <ThemedText
-                  type="small"
-                  style={{ color: prediction.confirmed ? theme.success : theme.textSecondary }}
-                >
-                  {prediction.confirmed ? 'Confirmed' : 'Ruled out'}
-                </ThemedText>
-              </View>
-            ))}
+            {/* --- already visible ----------------------------------------- */}
+            {visible.length > 0 ? (
+              <>
+                <View style={styles.reviewedHeader}>
+                  <SectionLabel>ALREADY VISIBLE</SectionLabel>
+                </View>
+                {visible.map((line) => (
+                  <View key={line.part_id} style={styles.reviewedRow}>
+                    <Ionicons name="checkmark-circle" size={18} color={theme.success} />
+                    <ThemedText type="small" style={styles.reviewedName} numberOfLines={1}>
+                      {line.qty > 1 ? `${line.qty}× ` : ''}
+                      {line.name}
+                    </ThemedText>
+                    <ThemedText type="small" style={{ color: theme.success }}>
+                      {formatProbability(line.p)}
+                    </ThemedText>
+                  </View>
+                ))}
+              </>
+            ) : null}
+
+            {typeof state.hidden_count === 'number' && state.hidden_count > 0 ? (
+              <ThemedText type="small" themeColor="textSecondary">
+                {state.hidden_count} more parts scored below the reporting threshold.
+              </ThemedText>
+            ) : null}
           </ScrollView>
 
           <View style={[styles.footer, { borderTopColor: theme.border }]}>
             <Button
               title="Send to customer"
-              onPress={() => router.push(`/job/${jobId}/send`)}
-              disabled={state.visibleDamage.length === 0}
+              onPress={() => router.push(`/job/${caseId}/send`)}
+              disabled={visible.length === 0 && order.length === 0}
               fullWidth
             />
-
-            {/* Self-clearing: the note goes as soon as they change the wording. */}
-            {draft && followUp === draft ? (
-              <ThemedText type="small" themeColor="textSecondary">
-                No catalogue part matched “{draft}”. Try naming the panel or lamp directly.
-              </ThemedText>
-            ) : null}
 
             <View
               style={[
@@ -348,7 +406,7 @@ export default function DiagnosisScreen() {
               <TextInput
                 value={followUp}
                 onChangeText={setFollowUp}
-                placeholder="Ask a follow-up…"
+                placeholder="Add what else you can see…"
                 placeholderTextColor={theme.textSecondary}
                 onSubmitEditing={askFollowUp}
                 returnKeyType="send"
@@ -381,6 +439,13 @@ export default function DiagnosisScreen() {
   );
 }
 
+function sideLabel(side: string): string {
+  if (side === 'L') return 'left';
+  if (side === 'R') return 'right';
+  if (side === 'both') return 'both sides';
+  return '';
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1 },
   padded: { padding: Spacing.three },
@@ -399,6 +464,18 @@ const styles = StyleSheet.create({
   },
 
   zonesCard: { gap: Spacing.two },
+
+  question: { gap: Spacing.two },
+  questionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two, marginTop: Spacing.one },
+  questionButton: {
+    flexGrow: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: TapTarget - 8,
+    paddingHorizontal: Spacing.three,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.prompt,
+  },
 
   row: { gap: Spacing.two },
   rowHead: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
@@ -421,7 +498,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two,
-    minHeight: 36,
+    paddingVertical: Spacing.one,
   },
   reviewedName: { flex: 1 },
 
@@ -443,8 +520,8 @@ const styles = StyleSheet.create({
   },
   followUpInput: { flex: 1, fontSize: 16, paddingVertical: Spacing.two },
   followUpSend: {
-    width: 44,
-    height: 44,
+    width: 40,
+    height: 40,
     borderRadius: Radius.prompt,
     alignItems: 'center',
     justifyContent: 'center',

@@ -18,15 +18,15 @@ export async function approveOption(
   _prevState: ApproveState,
   formData: FormData,
 ): Promise<ApproveState> {
-  const jobId = String(formData.get('jobId') ?? '');
+  const token = String(formData.get('token') ?? '');
   const optionId = String(formData.get('optionId') ?? '');
 
-  if (!jobId || !optionId) {
-    return { error: 'Missing job or option.' };
+  if (!token || !optionId) {
+    return { error: 'Missing quote or option.' };
   }
 
   try {
-    await api.submitApproval(jobId, optionId);
+    await api.submitApproval(token, optionId);
   } catch (error) {
     if (error instanceof ApiError) {
       return { error: error.detail ? `${error.message} — ${error.detail}` : error.message };
@@ -34,6 +34,6 @@ export async function approveOption(
     return { error: 'Something went wrong. Please try again.' };
   }
 
-  revalidatePath(`/approve/${jobId}`);
+  revalidatePath(`/approve/${token}`);
   return { error: null };
 }

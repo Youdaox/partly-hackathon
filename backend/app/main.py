@@ -15,7 +15,17 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.ai import cache
 from app.api import errors
-from app.api.v1 import audio, case, damage, media, parts, prediction, vehicle, vehicles
+from app.api.v1 import (
+    approve,
+    audio,
+    case,
+    damage,
+    media,
+    parts,
+    prediction,
+    vehicle,
+    vehicles,
+)
 from app.catalogue import registry
 from app.config import settings
 from app.store import cases
@@ -56,6 +66,7 @@ def create_app() -> FastAPI:
         damage.router,
         prediction.router,
         parts.router,
+        approve.router,
         vehicles.router,
     ):
         app.include_router(router, prefix="/v1")

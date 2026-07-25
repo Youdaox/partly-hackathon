@@ -17,8 +17,11 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-# Interpreter confidence words -> probability.
-CONFIDENCE_P = {"high": 0.92, "medium": 0.70, "low": 0.40}
+# Interpreter confidence words -> probability (spec 8.5).
+# Only `high` and `low` occur anywhere in the shipped dataset — verified across
+# every prediction file — so `medium` is an interpolation that never fires here
+# but keeps the mapping total if the Interpreter starts emitting it.
+CONFIDENCE_P = {"high": 0.95, "medium": 0.75, "low": 0.60}
 # Interpreter severity words -> the 1..5 ladder.
 SEVERITY_RANK = {"severe": 4, "major": 4, "moderate": 3, "minor": 2, "light": 1}
 # Hardware kits are asserted much more weakly than the part they belong to.
@@ -49,6 +52,11 @@ class InterpreterResult:
     conflicts: list[dict] = field(default_factory=list)
     # True when the oem_parts stage is still running (spec 6.9).
     in_progress: bool = False
+    # Tri-state (spec 8.2): None means the frames did not settle it.
+    wheel_displaced: bool | None = None
+    airbag_deployed: bool | None = None
+    # How far the car has already been stripped, read off the frame commentary.
+    exposed_depth: int = 0
 
     @property
     def available(self) -> bool:
@@ -103,6 +111,67 @@ def _severity_of(text: str) -> int | None:
     return None
 
 
+# The two checks that move an assessment most (spec 8.2). Each returns
+# True / False / None, and None is not the same as False: "the frames do not
+# show" must never be reported as "the frames show it did not happen".
+_WHEEL_DISPLACED = re.compile(
+    r"wheel[^.]{0,40}(displac|pushed back|misalign|out of position|tilt|askew)"
+    r"|(displac|pushed back|misalign)[^.]{0,40}wheel",
+    re.I,
+)
+_WHEEL_STRAIGHT = re.compile(
+    r"wheel[^.]{0,40}(appear|look|seem)[^.]{0,20}(straight|aligned|normal|fine|intact)"
+    r"|wheels? (are |is )?(straight|aligned|undamaged)",
+    re.I,
+)
+_AIRBAG_DEPLOYED = re.compile(r"airbags?[^.]{0,30}deploy(ed|ment)?\b", re.I)
+_AIRBAG_INTACT = re.compile(
+    r"no airbag|airbags?[^.]{0,30}(not deployed|undeployed|intact)"
+    r"|without airbag deployment",
+    re.I,
+)
+
+
+def _tristate(text: str, positive: re.Pattern, negative: re.Pattern) -> bool | None:
+    if negative.search(text):
+        return False
+    if positive.search(text):
+        return True
+    return None
+
+
+# Components the frames describe as already stripped off. This dataset never
+# says "displaced" or mentions airbags, but it says "wheel removed" and "wheel
+# arch liner removed" constantly — that is teardown progress, not damage, and it
+# tells the counterfactual engine what is now reachable.
+_REMOVED = re.compile(
+    r"([\w\s]{3,40}?)\s+(?:removed|missing|stripped|taken off|detached)", re.I
+)
+
+
+def _exposed_depth(text: str) -> int:
+    """Deepest layer the frames show as already opened up."""
+    from app.catalogue.tagger import classify
+    from app.tables.depth_map import DEPTH_MAP
+
+    depth = 0
+    for match in _REMOVED.finditer(text):
+        phrase = match.group(1).strip()
+        # A road wheel is not a catalogue klass, but taking one off exposes the
+        # hub, knuckle and suspension — which is exactly the layer the
+        # counterfactual wants to know is reachable.
+        if re.search(r"\bwheel\b", phrase, re.I) and not re.search(
+            r"wheel arch|wheelhouse", phrase, re.I
+        ):
+            depth = max(depth, DEPTH_MAP["wheel_hub"])
+            continue
+        klass = classify(phrase)
+        if klass == "unknown":
+            continue
+        depth = max(depth, DEPTH_MAP.get(klass, 0))
+    return depth
+
+
 def parse(payload: dict) -> InterpreterResult:
     result = InterpreterResult()
 
@@ -137,6 +206,18 @@ def parse(payload: dict) -> InterpreterResult:
         result.zone = max(set(zone_votes), key=zone_votes.count)
     if severities:
         result.severity = max(severities)
+
+    prose = " ".join(result.evidence)
+    result.wheel_displaced = _tristate(prose, _WHEEL_DISPLACED, _WHEEL_STRAIGHT)
+    result.airbag_deployed = _tristate(prose, _AIRBAG_DEPLOYED, _AIRBAG_INTACT)
+    result.exposed_depth = _exposed_depth(prose)
+
+    # A displaced wheel or a deployed airbag is a floor on severity, not a
+    # vote: both are only visible once the impact has gone past the outer skin.
+    if result.airbag_deployed:
+        result.severity = max(result.severity, 5)
+    elif result.wheel_displaced:
+        result.severity = max(result.severity, 4)
 
     # Frames genuinely disagree in this dataset — the Yaris has one frame calling
     # the damage right-hand and another calling it left. Surfacing that is what

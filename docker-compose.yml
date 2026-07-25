@@ -1,36 +1,29 @@
+# The Partli backend. `docker compose up` gives you the API on :8080.
+#
+# Postgres is gone: the backend keeps case state in memory with a 24 h TTL, which
+# is the variant the spec sanctions for the MVP. The catalogue is read-only data
+# on disk, so there is nothing durable left to store.
+
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: partli-db
+  api:
+    build: ./backend
+    container_name: partli-api
     restart: unless-stopped
     ports:
-      - "5432:5432"
-    environment:
-      POSTGRES_USER: partli
-      POSTGRES_PASSWORD: partli
-      POSTGRES_DB: partli
+      - "8080:8080"
     volumes:
-      - postgres-data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U partli -d partli"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
-  # Partly's read-only dataset API from the hackathon bundle (docs at :8420/docs).
-  # The `api/` image source was NOT included in this repo, so this service is behind
-  # a profile and will not start with a plain `docker compose up`. Drop the folder in
-  # and run `docker compose --profile dataset up` if you want it. Nothing in Partli
-  # depends on it — apps/api reads `data/` straight off disk via packages/shared.
-  dataset-api:
-    profiles: ["dataset"]
-    build: ./api
-    ports:
-      - "8420:8420"
-    volumes:
+      # Read-only: the backend loads catalogues at boot and never writes here.
       - ./data:/data:ro
     environment:
-      DATA_DIR: /data
-
-volumes:
-  postgres-data:
+      PARTLI_DATA_DIR: /data
+      # Where the customer approval page is served from. Must be reachable from
+      # the customer's phone, not just from this container.
+      PARTLI_WEB_BASE_URL: ${WEB_BASE_URL:-http://localhost:3000}
+    healthcheck:
+      # Boot preloads every catalogue before binding the port, so the start
+      # period covers that rather than the healthcheck flapping through it.
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8080/healthz')"]
+      interval: 15s
+      timeout: 3s
+      start_period: 40s
+      retries: 3

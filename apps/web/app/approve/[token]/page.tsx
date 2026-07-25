@@ -2,7 +2,8 @@
  * Public customer approval page.
  *
  * Opened from a QR code on the repairer's phone, so it is designed mobile-first and
- * needs no login — the job id in the URL is the secret.
+ * needs no login — the token in the URL is the secret. It is not the case id, so
+ * the link cannot be walked to another customer's quote.
  */
 
 import type { Metadata } from 'next';
@@ -10,6 +11,8 @@ import { CheckCircle2 } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { formatPrice } from '@partli/shared';
+
 import { ApiError, api } from '@/lib/api';
 import { ApprovalForm } from './approval-form';
 
@@ -20,13 +23,13 @@ export const metadata: Metadata = {
 export default async function ApprovePage({
   params,
 }: {
-  params: Promise<{ jobId: string }>;
+  params: Promise<{ token: string }>;
 }) {
-  const { jobId } = await params;
+  const { token } = await params;
 
   let payload;
   try {
-    payload = await api.getApproval(jobId);
+    payload = await api.getApproval(token);
   } catch (error) {
     const apiError = error instanceof ApiError ? error : null;
     return (
@@ -46,8 +49,14 @@ export default async function ApprovePage({
     );
   }
 
-  const { vehicle, lineItems, approvedOption, approvedAt } = payload;
-  const hiddenCount = lineItems.filter((item) => item.kind === 'hidden').length;
+  const {
+    vehicle,
+    lines,
+    approved_option: approvedOption,
+    approved_at: approvedAt,
+    totals,
+  } = payload;
+  const hiddenCount = lines.filter((item) => item.kind === 'hidden').length;
 
   return (
     <main className="mx-auto w-full max-w-lg px-4 py-8 sm:py-12">
@@ -56,10 +65,11 @@ export default async function ApprovePage({
         <h1 className="mt-1 text-2xl font-semibold tracking-tight">
           Your repair options are ready
         </h1>
-        {vehicle ? (
+        {vehicle?.make || vehicle?.rego ? (
           <p className="mt-1 text-sm text-muted-foreground">
-            {vehicle.make.toUpperCase()} {vehicle.model}
+            {(vehicle.make ?? '').toUpperCase()} {vehicle.model}
             {vehicle.year ? ` · ${vehicle.year}` : ''}
+            {vehicle.rego ? ` · ${vehicle.rego}` : ''}
           </p>
         ) : null}
       </header>
@@ -73,7 +83,7 @@ export default async function ApprovePage({
               <p className="mt-1 text-sm text-muted-foreground">
                 Your repairer has been notified and will order the parts.
                 {approvedAt
-                  ? ` Approved ${new Date(approvedAt).toLocaleString('en-NZ', {
+                  ? ` Approved ${new Date(approvedAt * 1000).toLocaleString('en-NZ', {
                       dateStyle: 'medium',
                       timeStyle: 'short',
                     })}.`
@@ -87,7 +97,7 @@ export default async function ApprovePage({
       <Card className="mb-6">
         <CardHeader className="pb-3">
           <CardTitle className="text-base">
-            {lineItems.length} parts need replacing
+            {lines.length} parts need replacing
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -114,10 +124,11 @@ export default async function ApprovePage({
         Choose how you&apos;d like these parts supplied
       </h2>
 
-      <ApprovalForm jobId={jobId} lineItems={lineItems} approvedOption={approvedOption} />
+      <ApprovalForm token={token} lines={lines} approvedOption={approvedOption} />
 
       <p className="mt-8 text-center text-xs text-muted-foreground">
-        Prices are indicative and confirmed by your repairer before any work starts.
+        Indicative pricing from {formatPrice(totals.cheapest_nzd)}, confirmed by your
+        repairer before any work starts. No supplier data ships with this dataset.
       </p>
     </main>
   );

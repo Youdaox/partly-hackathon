@@ -88,7 +88,9 @@ def test_tag_returns_a_complete_record():
         "klass": "cover_retainer",
         "side": "R",
         "zone": "front",
-        "depth": 2,
+        # Depth 1 per the 9.3 reference table: the retainer is destroyed the
+        # moment the cover moves, so it sits with the cover, not behind it.
+        "depth": 1,
         "leak_class": "consumable",
     }
 

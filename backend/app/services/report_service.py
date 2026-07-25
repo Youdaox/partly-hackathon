@@ -122,7 +122,12 @@ def build(
         check_lines.append(line)
     payload["sections"]["check"] = check_lines
 
-    if report.question is not None:
+    # A klass the repairer raised and could not settle outranks any question the
+    # counterfactual invents, because they already have it on their mind (8.3).
+    raised = _raised_question(case, catalogue)
+    if raised is not None:
+        payload["question"] = raised
+    elif report.question is not None:
         payload["question"] = {
             "id": report.question.id,
             "text": report.question.text,
@@ -130,10 +135,58 @@ def build(
             "value": report.question.value,
         }
 
+    # The top accessible inspections (spec 9.6): what to physically look at
+    # first, with the parts each answer would settle.
+    payload["inspect_first"] = [
+        {
+            "part_id": item.part_id,
+            "name": catalogue.by_id[item.part_id].name,
+            "value": item.value,
+            "informs": len(item.informs),
+        }
+        for item in report.sections.inspect_first
+        if item.part_id in catalogue.by_id
+    ]
+
     payload["hidden_count"] = report.sections.hidden_count
     payload["computed_ms"] = report.computed_ms
     payload["candidates"] = report.candidates
     return payload
+
+
+# Plain-English names for the classes a repairer hedges about most.
+_KLASS_LABEL = {
+    "side_member": "the chassis rail",
+    "suspension_arm": "the suspension",
+    "strut_tower": "the strut tower",
+    "radiator": "the radiator",
+    "condenser": "the condenser",
+    "reinforcement_beam": "the reinforcement bar",
+    "subframe": "the subframe",
+    "steering_rack": "the steering",
+    "wheel_hub": "the wheel bearing",
+    "airbag_module": "the airbags",
+}
+
+
+def _raised_question(case: Case, catalogue: Catalogue) -> dict | None:
+    """Turn an unsettled spoken mention into the next question."""
+    for klass in case.question_candidates:
+        if any(
+            case.confirmations.get(part.part_id) is not None
+            for part in catalogue.parts
+            if part.klass == klass
+        ):
+            continue  # already resolved by an inspection
+        label = _KLASS_LABEL.get(klass, klass.replace("_", " "))
+        return {
+            "id": f"q_raised_{klass}",
+            "text": f"You weren't sure about {label} — can you take a look?",
+            "options": ["Damaged", "Looks fine", "Can't get to it"],
+            "value": 1.0,
+            "source": "repairer",
+        }
+    return None
 
 
 def vehicle_payload(vehicle: Vehicle) -> dict:

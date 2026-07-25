@@ -41,7 +41,7 @@ interface TranscriptLine {
 export default function CaptureScreen() {
   // `draft` is set when the entry screen could not match what was typed to a part —
   // it arrives here so the repairer can reword it rather than retype it.
-  const { id: jobId, draft: carriedDraft } = useLocalSearchParams<{
+  const { id: caseId, draft: carriedDraft } = useLocalSearchParams<{
     id: string;
     draft?: string;
   }>();
@@ -49,7 +49,7 @@ export default function CaptureScreen() {
   const theme = useTheme();
   const voice = useVoiceCapture();
 
-  const job = useAsyncData(() => api.getJob(jobId), [jobId]);
+  const job = useAsyncData(() => api.getReport(caseId), [caseId]);
 
   const [transcript, setTranscript] = useState<TranscriptLine[]>([]);
   const [draft, setDraft] = useState(carriedDraft ?? '');
@@ -71,14 +71,16 @@ export default function CaptureScreen() {
       ]);
 
       try {
-        const item = await api.addDamage(jobId, trimmed, source);
+        // Whatever they said is evidence, not a part id: the backend extracts
+        // zone, side, severity and the components named, then recomputes.
+        await api.sendMessage(caseId, trimmed);
+        const next = await api.getReport(caseId);
+        job.setData(next);
+        const named = next.sections.visible[0]?.name ?? null;
         setTranscript((prev) =>
-          prev.map((line) =>
-            line.id === lineId ? { ...line, resolvedTo: item.displayName } : line,
-          ),
+          prev.map((line) => (line.id === lineId ? { ...line, resolvedTo: named } : line)),
         );
         setDraft('');
-        await job.reload();
       } catch (err) {
         setTranscript((prev) =>
           prev.map((line) => (line.id === lineId ? { ...line, failed: true } : line)),
@@ -88,7 +90,7 @@ export default function CaptureScreen() {
         setSubmitting(false);
       }
     },
-    [jobId, job, submitting],
+    [caseId, job, submitting],
   );
 
   const toggleRecording = useCallback(async () => {
@@ -100,22 +102,26 @@ export default function CaptureScreen() {
     }
   }, [voice, submitText]);
 
+  /**
+   * Removing a part is a *negative confirmation*, not a delete. Telling the
+   * engine a part is undamaged suppresses everything downstream of it, which a
+   * plain delete could not do.
+   */
   const removeItem = useCallback(
-    async (damageId: string) => {
+    async (partId: string) => {
       try {
-        await api.removeDamage(jobId, damageId);
-        await job.reload();
+        job.setData(await api.confirm(caseId, partId, false));
       } catch (err) {
         setActionError(toErrorInfo(err));
       }
     },
-    [jobId, job],
+    [caseId, job],
   );
 
   if (job.loading) {
     return (
       <ThemedView style={styles.container}>
-        <Loading label="Loading job…" />
+        <Loading label="Loading case…" />
       </ThemedView>
     );
   }
@@ -147,8 +153,9 @@ export default function CaptureScreen() {
         <ScrollView contentContainerStyle={styles.list} keyboardShouldPersistTaps="handled">
           <View style={styles.header}>
             <ThemedText type="smallBold">
-              {state.vehicle?.make.toUpperCase()} {state.vehicle?.model}
-              {state.vehicle?.year ? ` · ${state.vehicle.year}` : ''}
+              {(state.vehicle.make ?? '').toUpperCase()} {state.vehicle.model ?? ''}
+              {state.vehicle.year ? ` · ${state.vehicle.year}` : ''}
+              {!state.vehicle.make ? state.vehicle.rego : ''}
             </ThemedText>
             <Pill label={state.status} />
           </View>
@@ -232,22 +239,22 @@ export default function CaptureScreen() {
           {/* --- live visible damage list --- */}
           <View style={styles.sectionHeader}>
             <ThemedText type="smallBold">Visible damage</ThemedText>
-            <Pill label={`${state.visibleDamage.length}`} tone="accent" />
+            <Pill label={`${state.sections.visible.length}`} tone="accent" />
           </View>
 
-          {state.visibleDamage.length === 0 ? (
+          {state.sections.visible.length === 0 ? (
             <EmptyState message="Nothing yet. Name a damaged part to get started." />
           ) : (
-            state.visibleDamage.map((item) => (
-              <Card key={item.id} style={styles.damageCard}>
+            state.sections.visible.map((item) => (
+              <Card key={item.part_id} style={styles.damageCard}>
                 <View style={styles.damageRow}>
                   <View style={styles.damageText}>
-                    <ThemedText type="smallBold">{item.displayName}</ThemedText>
+                    <ThemedText type="smallBold">{item.name}</ThemedText>
                     <ThemedText type="small" themeColor="textSecondary">
-                      {item.manufacturerPartNumber ?? 'no part number'} · {item.source}
+                      {item.part_number ?? 'no part number'}
                     </ThemedText>
                   </View>
-                  <Pressable onPress={() => removeItem(item.id)} accessibilityRole="button">
+                  <Pressable onPress={() => removeItem(item.part_id)} accessibilityRole="button">
                     <ThemedText type="small" style={{ color: theme.danger }}>
                       Remove
                     </ThemedText>
@@ -261,8 +268,8 @@ export default function CaptureScreen() {
         <View style={[styles.footer, { borderTopColor: theme.border }]}>
           <Button
             title="Find hidden damage"
-            onPress={() => router.push(`/job/${jobId}/hidden`)}
-            disabled={state.visibleDamage.length === 0}
+            onPress={() => router.push(`/job/${caseId}/hidden`)}
+            disabled={state.sections.visible.length === 0}
             fullWidth
           />
         </View>
