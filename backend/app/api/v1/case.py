@@ -15,7 +15,7 @@ from app.schemas.requests import (
     MessageRequest,
     TranscriptEditRequest,
 )
-from app.services import case_service
+from app.services import case_service, media_service
 from app.store import cases
 from app.store.cases import Case
 from app.utils import sse
@@ -100,6 +100,7 @@ async def get_case(case: Case = Depends(require_case)) -> dict:
             }
             for message in case.messages
         ],
+        "media": [media_service.payload(asset) for asset in cases.uploaded_media(case)],
         "report": case.last_report,
     }
 
@@ -174,6 +175,18 @@ async def post_answer(body: AnswerRequest, case: Case = Depends(require_case)) -
         # An answered side conflict is a resolved one.
         case.conflicts = [c for c in case.conflicts if c.get("field") != "side"]
 
+    elif body.question_id.startswith("q_check_"):
+        # "Take a look at X — is it damaged?" The answer is an inspection
+        # result, so it goes down the same path a ✓ or ✗ on the part would:
+        # clamped, then re-propagated. "Can't tell" deliberately records
+        # nothing — a guess is worse than the estimate it would replace, and
+        # the question is not re-asked because `questions_asked` has it now.
+        part_id = body.question_id.removeprefix("q_check_")
+        if value.startswith("damaged"):
+            case_service.confirm(case.id, part_id, damaged=True)
+        elif value.startswith(("looks fine", "fine", "not damaged")):
+            case_service.confirm(case.id, part_id, damaged=False)
+
     elif body.question_id.startswith("q_raised_"):
         # Answering a klass the repairer raised themselves: clamp every part of
         # that class in the impact zone, and stop asking.
@@ -184,28 +197,10 @@ async def post_answer(body: AnswerRequest, case: Case = Depends(require_case)) -
             case_service.confirm_klass(case, klass, damaged=False)
         case.question_candidates.pop(klass, None)
 
-    # Severity discriminators (spec 9.5): each pins one boundary of the ladder.
-    elif body.question_id == "q_wheels":
-        # Straight wheels cap severity at 3; a shifted wheel is the S4 definition.
-        if value.startswith("yes"):
-            case.severity = min(case.severity, 3)
-        elif value.startswith("no"):
-            case.severity = max(case.severity, 4)
-        case.severity_source = "repairer"
-
-    elif body.question_id == "q_airbags":
-        if value.startswith("yes"):
-            case.severity = max(case.severity, 4)
-        elif value.startswith("no"):
-            case.severity = min(case.severity, 3)
-        case.severity_source = "repairer"
-
-    elif body.question_id == "q_door":
-        if value.startswith("no"):
-            case.severity = max(case.severity, 5)
-        elif value.startswith("yes"):
-            case.severity = min(case.severity, 4)
-        case.severity_source = "repairer"
+    # The severity discriminators that used to live here — q_wheels, q_airbags,
+    # q_door — are gone with the questions that fed them. They asked the
+    # repairer to reconstruct an impact he never saw, and they were the same
+    # three every time regardless of the damage in front of him.
 
     cases.add_message(case, role="repairer", kind="question",
                       text=body.value, meta={"question_id": body.question_id})

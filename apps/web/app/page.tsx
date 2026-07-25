@@ -1,52 +1,22 @@
-import Link from 'next/link';
-
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-
 /**
- * Landing page. Not part of the demo flow — it just points at the two real routes
- * so nobody has to remember the URLs.
+ * The app opens on the rego.
+ *
+ * This used to be a set of links to the dashboard and the approval page. Both
+ * still exist at their own URLs, but neither is what the product is: the first
+ * thing anyone should see is the one field that starts a job, because the
+ * order of the flow — rego, then the vehicle's real parts, then the photos —
+ * is the argument the app is making.
  */
+
+import type { Metadata } from 'next';
+
+import { Flow } from '@/components/flow/flow';
+
+export const metadata: Metadata = {
+  title: 'Find hidden damage — Partli',
+  description: 'Enter a registration to pull the vehicle’s exact OEM parts and predict the damage behind the panels.',
+};
+
 export default function Home() {
-  return (
-    <main className="mx-auto w-full max-w-lg px-4 py-16">
-      <p className="text-sm font-medium text-primary">Partli</p>
-      <h1 className="mt-1 text-2xl font-semibold tracking-tight">
-        Customer approvals &amp; front desk
-      </h1>
-      <p className="mt-2 text-sm text-muted-foreground">
-        The repairer captures damage in the mobile app. This is where the customer approves
-        the quote, and where the front desk watches jobs move.
-      </p>
-
-      <div className="mt-8 space-y-3">
-        <Link href="/dashboard" className="block">
-          <Card className="transition-colors hover:border-primary">
-            <CardHeader>
-              <CardTitle className="text-base">Front desk dashboard →</CardTitle>
-            </CardHeader>
-            <CardContent className="pt-0">
-              <p className="text-sm text-muted-foreground">
-                Every job and its current status.
-              </p>
-            </CardContent>
-          </Card>
-        </Link>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Customer approval page</CardTitle>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <p className="text-sm text-muted-foreground">
-              Lives at{' '}
-              <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
-                /approve/&lt;jobId&gt;
-              </code>
-              . Get a real link by pressing &ldquo;Send to customer&rdquo; in the mobile app.
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-    </main>
-  );
+  return <Flow />;
 }

@@ -51,6 +51,28 @@ MAX_INSPECT = 3      # inspect_first list cap
 CAP_VISIBLE = 12
 CAP_ORDER = 8
 
+# --- Clarifying question (local) ---------------------------------------------
+# The assistant asks at most one question, and it has to be one the repairer can
+# answer by looking at the car in front of him. It used to ask about the crash —
+# "are the wheels sitting straight?", "did the airbags go off?" — which he never
+# saw, and which were the same three every time regardless of the damage.
+#
+# The replacement is chosen from this case's own predictions: a part that is
+# genuinely undecided, that he can reach right now, and whose answer moves the
+# rest of the report.
+
+# Genuinely undecided. Outside this band the answer changes nothing: a part at
+# 0.9 is already ordered and one at 0.1 is already ignored.
+QUESTION_BAND_MIN = 0.35
+QUESTION_BAND_MAX = 0.70
+
+# How much the rest of the report must move, in summed probability, before the
+# interruption is worth it. Measured on `downstream` rather than the total
+# inspection value, because `value` is dominated by the part's own uncertainty:
+# on the Yaris every in-band part scores ~0.96 on own alone while settling
+# nothing else, and asking about those is a filler question with a good score.
+QUESTION_MIN_DOWNSTREAM = 0.75
+
 # --- Counterfactual (spec 9.5) --------------------------------------------------
 # accessible_i = depth_i <= exposed_depth + ACCESSIBLE_MARGIN
 ACCESSIBLE_MARGIN = 2
@@ -61,3 +83,54 @@ QUESTION_MIN_BUCKET_MOVES = 3
 # --- Propagation (local, not in 9.0) --------------------------------------------
 # Below this an edge is not worth traversing; keeps the sweep inside its budget.
 MIN_EDGE_CONTRIBUTION = 0.002
+
+# Noisy-OR requires its incoming causes to be independent. A catalogue lists one
+# physical component once per fitted position and variant, so nine `bumper_cover`
+# rows in the front zone are one cause written nine times. Edges are therefore
+# grouped into evidential channels — (source klass, relation) — and inside a
+# channel the k-th strongest contribution counts for DECAY**k of itself.
+# Distinct channels still combine at full strength, so the survival product
+# between genuinely independent causes is untouched. See graph.propagate.
+SOURCE_GROUP_DECAY = 0.35
+
+# The direct (root) term says "the impact itself damaged this part". It is
+# built from zone, depth and class prior — none of which know *what* was seen,
+# only where and how hard. At full strength that made it the loudest term in
+# the model, and the consequence was that the report barely depended on the
+# damage at all: an un-seeded Yaris case, with no interpreter output
+# whatsoever, produced six of the same eight order lines at the same
+# probabilities. A hidden-damage prediction that survives deleting the evidence
+# is not a prediction, it is a list of front-end parts.
+#
+# So the direct term is conditioned on there being observed damage to be direct
+# *about*. It reaches full strength once the interpreter has seen something at
+# this confidence and fades to nothing when it has seen nothing, leaving the
+# leak and the edges — the terms that do depend on the evidence. Clamped rather
+# than proportional so a confident observation reproduces the spec 9.3 numbers
+# exactly.
+ROOT_SUPPORT_FULL = 0.95
+
+# --- Consumable tier (local) ------------------------------------------------
+# Fasteners, retainers, liners and seals: destroyed because the component they
+# hold is taken off, not because anyone chose to replace them. Their
+# probabilities are right and stay as they are — what was wrong was showing
+# them as order lines of their own. A repairer orders a bumper cover and its
+# clips; they never order nine clips. buckets._group_hardware folds these
+# under the part they belong to.
+CONSUMABLE_KLASSES = frozenset({
+    "clip",
+    "cover_retainer",
+    "seal",
+    "fender_liner",
+    "splash_shield",
+    "undercover",
+    "washer_nozzle",
+    "mudflap",
+})
+
+# Relations along which a consumable belongs to the part above it.
+PARENT_RELATIONS = ("hardware", "sub_assembly", "mounts")
+
+# Hardware children listed under one order line. Beyond this the payload grows
+# without telling the repairer anything new; the remainder is counted instead.
+MAX_HARDWARE_CHILDREN = 6

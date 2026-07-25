@@ -25,6 +25,29 @@ const KIND_LABEL: Record<string, string> = {
   hidden: 'Found before teardown',
 };
 
+const KIND_INTRO: Record<string, string> = {
+  visible: 'Damage in the photos of your car. Confirmed, not estimated.',
+  hidden: 'Parts behind the panels, predicted from where the impact landed.',
+};
+
+/**
+ * Confidence, in the three bands a decision actually has.
+ *
+ * Shown for predicted parts only. A part in `visible` is damage a customer can
+ * see in their own photos, and putting "95%" beside it invites them to wonder
+ * about the other 5% of something that is not in doubt. Matches the repairer's
+ * app, so the two sides of the same job read the same way.
+ */
+function Likelihood({ p }: { p: number }) {
+  const [label, tone] =
+    p >= 0.8
+      ? ['Very likely', 'default' as const]
+      : p >= 0.6
+        ? ['Likely', 'secondary' as const]
+        : ['Possible', 'outline' as const];
+  return <Badge variant={tone}>{label}</Badge>;
+}
+
 export function QuoteForm({ token, lines }: { token: string; lines: ApprovalLine[] }) {
   // Default every line to the recommended option, falling back to the first.
   const [picks, setPicks] = useState<Record<string, string | null>>(() =>
@@ -82,9 +105,14 @@ export function QuoteForm({ token, lines }: { token: string; lines: ApprovalLine
     <div className="flex flex-col gap-6">
       {kinds.map((kind) => (
         <section key={kind} className="flex flex-col gap-3">
-          <h2 className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
-            {KIND_LABEL[kind] ?? kind}
-          </h2>
+          <div>
+            <h2 className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
+              {KIND_LABEL[kind] ?? kind}
+            </h2>
+            {KIND_INTRO[kind] ? (
+              <p className="mt-1 text-xs text-muted-foreground">{KIND_INTRO[kind]}</p>
+            ) : null}
+          </div>
 
           {lines
             .filter((line) => line.kind === kind)
@@ -102,10 +130,18 @@ export function QuoteForm({ token, lines }: { token: string; lines: ApprovalLine
                         ) : null}
                       </p>
                       {line.part_number ? (
-                        <p className="truncate text-xs text-muted-foreground">{line.part_number}</p>
+                        <p className="truncate font-mono text-[11px] text-muted-foreground">
+                          {line.part_number.split(':').pop()}
+                        </p>
                       ) : null}
                     </div>
-                    <Badge variant="secondary">{Math.round(line.p * 100)}%</Badge>
+                    {line.kind === 'visible' ? (
+                      <span className="shrink-0 text-[11px] uppercase tracking-wide text-muted-foreground">
+                        Detected
+                      </span>
+                    ) : (
+                      <Likelihood p={line.p} />
+                    )}
                   </div>
 
                   <div className="flex flex-col gap-2">

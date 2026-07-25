@@ -9,7 +9,7 @@
  * profile was decoration, and it pushed the actual parts list below the fold.
  */
 
-import { Fragment } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -69,8 +69,269 @@ function vehicleStatusLine(vehicle: VehiclePayload | null): string {
 function impactLine(report: CaseReport): string | null {
   if (!report.impact?.zone) return null;
   const side = sideLabel(report.impact.side);
-  const severity = report.impact.severity != null ? ` · severity ${report.impact.severity}/3` : '';
-  return `${report.impact.zone}${side ? `, ${side}` : ''}${severity}`;
+  const zone = report.impact.zone;
+  // "Front-right collision" rather than "front, right · severity 3/3" — the
+  // severity number meant nothing without the ladder beside it.
+  const where = side && side !== 'centre' ? `${zone}-${side}` : zone;
+  return `${where.charAt(0).toUpperCase()}${where.slice(1)} collision`;
+}
+
+/** How much a probability must move before it is worth pointing at. */
+const CASCADE_EPSILON = 0.005;
+
+/** How long a moved row stays highlighted after a confirmation. */
+const CASCADE_HIGHLIGHT_MS = 6000;
+
+interface Change {
+  from: number;
+  to: number;
+}
+
+/**
+ * What the last tap did to everything else.
+ *
+ * The cascade is the whole proof — tell the model one part is fine and the
+ * parts behind it drop — but the arithmetic is undramatic: a dependent falls
+ * by five to eighteen points, and only one or two cross the order threshold.
+ * That is easy to miss on a stage, so the report is diffed against the one
+ * before it and the rows that actually moved say so.
+ */
+function useCascade(report: CaseReport | null) {
+  const previous = useRef<Map<string, number> | null>(null);
+  const previousOrder = useRef<Set<string>>(new Set());
+  const [changes, setChanges] = useState<Map<string, Change>>(new Map());
+  const [departed, setDeparted] = useState(0);
+
+  useEffect(() => {
+    if (!report) return;
+
+    const now = new Map<string, number>();
+    for (const section of Object.values(report.sections)) {
+      for (const line of section) now.set(line.part_id, line.p);
+    }
+    const before = previous.current;
+    const beforeOrder = previousOrder.current;
+    const nowOrder = new Set(report.sections.order.map((l) => l.part_id));
+    previous.current = now;
+    previousOrder.current = nowOrder;
+
+    // The first report has nothing to be a change from.
+    if (!before) return;
+
+    const moved = new Map<string, Change>();
+    for (const [partId, to] of now) {
+      const from = before.get(partId);
+      if (from != null && Math.abs(to - from) >= CASCADE_EPSILON) {
+        moved.set(partId, { from, to });
+      }
+    }
+    // Parts that fell out of the order bucket moved the most of all, and are
+    // no longer on screen to say so themselves.
+    const gone = [...beforeOrder].filter((partId) => !nowOrder.has(partId)).length;
+
+    setChanges(moved);
+    setDeparted(gone);
+    if (moved.size === 0 && gone === 0) return;
+
+    const timer = setTimeout(() => {
+      setChanges(new Map());
+      setDeparted(0);
+    }, CASCADE_HIGHLIGHT_MS);
+    return () => clearTimeout(timer);
+  }, [report]);
+
+  return { changes, departed };
+}
+
+/** ✓ / ✗ — the only interaction: two taps, greasy hands. */
+function ConfirmRow({
+  line,
+  busy,
+  onConfirm,
+}: {
+  line: ReportLine;
+  busy: boolean;
+  onConfirm: (partId: string, damaged: boolean) => void;
+}) {
+  const theme = useTheme();
+
+  if (line.confirmed != null) {
+    return (
+      <View style={styles.reviewedRow}>
+        <Ionicons
+          name={line.confirmed ? 'checkmark-circle' : 'close-circle-outline'}
+          size={18}
+          color={line.confirmed ? theme.success : theme.textSecondary}
+        />
+        <ThemedText
+          type="small"
+          style={{ color: line.confirmed ? theme.success : theme.textSecondary }}
+        >
+          {line.confirmed ? 'Confirmed damaged' : 'Ruled out'}
+        </ThemedText>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.answerRow}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Confirm ${line.name} is damaged`}
+        disabled={busy}
+        onPress={() => onConfirm(line.part_id, true)}
+        style={({ pressed }) => [
+          styles.answerButton,
+          { borderColor: theme.success, opacity: pressed ? 0.6 : 1 },
+        ]}
+      >
+        <Ionicons name="checkmark" size={20} color={theme.success} />
+        <ThemedText type="smallBold" style={{ color: theme.success }}>
+          Damaged
+        </ThemedText>
+      </Pressable>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Rule out ${line.name}`}
+        disabled={busy}
+        onPress={() => onConfirm(line.part_id, false)}
+        style={({ pressed }) => [
+          styles.answerButton,
+          { borderColor: theme.border, opacity: pressed ? 0.6 : 1 },
+        ]}
+      >
+        <Ionicons name="close" size={20} color={theme.textSecondary} />
+        <ThemedText type="smallBold" themeColor="textSecondary">
+          Not damaged
+        </ThemedText>
+      </Pressable>
+    </View>
+  );
+}
+
+/**
+ * One predicted part — the row the whole screen exists for.
+ *
+ * Leads with the name and the plain-language reason, because that is the pair
+ * a repairer reads. The part number is the thing they phone through later, so
+ * it is demoted to a small monospace second line rather than competing with
+ * the name. The fasteners that come with the part are folded away: they are
+ * real and they get ordered, but nine clip rows are what made this list
+ * unreadable.
+ */
+function HiddenRow({
+  line,
+  index,
+  busy,
+  change,
+  onConfirm,
+}: {
+  line: ReportLine;
+  index: number;
+  busy: boolean;
+  /** Set when the last confirmation moved this part's probability. */
+  change?: Change;
+  onConfirm: (partId: string, damaged: boolean) => void;
+}) {
+  const theme = useTheme();
+  const [showHardware, setShowHardware] = useState(false);
+  const hardware = line.hardware ?? [];
+  const dropped = change != null && change.to < change.from;
+
+  return (
+    // Each card carries its own crop marks, as in the mockup — the frame is a
+    // registration mark around one part, not a box around the whole list. Every
+    // card keeps both rules and is pulled up a hairline, so the boundary two
+    // cards share is drawn once rather than twice.
+    <Framed
+      style={[
+        styles.heroCard,
+        index > 0 && styles.heroCardStacked,
+        // A moved row says so for a few seconds, so the tap that moved it is
+        // visibly what moved it.
+        change != null && { backgroundColor: theme.badgeFill },
+      ]}
+    >
+      {/* Numbered circle · bold name · % match, all on one line. The badge is
+          numerical on purpose: 95% and 38% are different decisions, and three
+          bands flattened them into the same word. */}
+      <View style={styles.heroHead}>
+        <NumberBadge n={index + 1} />
+        <ThemedText style={styles.heroName}>
+          {line.name}
+          {line.qty > 1 ? ` ×${line.qty}` : ''}
+        </ThemedText>
+        {/* A settled part shows its state, not a percentage. */}
+        {line.confirmed == null ? <MatchBadge value={line.p} /> : null}
+      </View>
+
+      {change != null ? (
+        <View style={styles.deltaRow}>
+          <Ionicons
+            name={dropped ? 'arrow-down' : 'arrow-up'}
+            size={13}
+            color={dropped ? theme.textSecondary : theme.danger}
+          />
+          <ThemedText
+            type="small"
+            style={{ color: dropped ? theme.textSecondary : theme.danger }}
+          >
+            {Math.round(change.from * 100)}% → {Math.round(change.to * 100)}%
+          </ThemedText>
+        </View>
+      ) : null}
+
+      {line.reason ? (
+        // Body size, not caption size: the reason is the sentence a repairer
+        // actually reads, so it gets the same weight as the mockup gives it.
+        <ThemedText themeColor="textSecondary" style={styles.heroReason}>
+          {line.reason}
+        </ThemedText>
+      ) : null}
+
+      {line.part_number ? (
+        <ThemedText type="small" themeColor="textSecondary" style={styles.partNumber}>
+          {line.part_number}
+        </ThemedText>
+      ) : null}
+
+      {hardware.length > 0 ? (
+        <Fragment>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => setShowHardware((open) => !open)}
+            style={({ pressed }) => [styles.whyToggle, { opacity: pressed ? 0.6 : 1 }]}
+          >
+            <Ionicons
+              name={showHardware ? 'chevron-up' : 'chevron-down'}
+              size={15}
+              color={theme.textSecondary}
+            />
+            <ThemedText type="small" themeColor="textSecondary">
+              {showHardware ? 'Hide' : `+ ${hardware.length}`} fastener
+              {hardware.length === 1 ? '' : 's'} &amp; seals
+            </ThemedText>
+          </Pressable>
+          {showHardware ? (
+            <View style={styles.hardwareList}>
+              {hardware.map((item) => (
+                <ThemedText key={item.part_id} type="small" themeColor="textSecondary">
+                  {item.name}
+                  {item.qty > 1 ? ` ×${item.qty}` : ''}
+                </ThemedText>
+              ))}
+            </View>
+          ) : null}
+        </Fragment>
+      ) : null}
+
+      {/* The cascade lives here. Crossing out a predicted *parent* is the demo
+          line — "watch what happens to the parts behind it" — and only these
+          have parts behind them. The check section's terminal items do not,
+          which is why the control looked broken when it was only down there. */}
+      <ConfirmRow line={line} busy={busy} onConfirm={onConfirm} />
+    </Framed>
+  );
 }
 
 export interface CaseReportViewProps {
@@ -105,6 +366,7 @@ export function CaseReportView({
   footer,
 }: CaseReportViewProps) {
   const theme = useTheme();
+  const cascade = useCascade(report);
 
   const resolving = vehicle?.status === 'resolving';
 
@@ -145,38 +407,17 @@ export function CaseReportView({
   }
   const impact = impactLine(report);
 
-  /** A line in the see/order sections: no confirm, no attribution. */
-  const plainLine = (line: ReportLine, index: number) => (
-    <View
-      key={line.part_id}
-      style={[styles.card, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}
-    >
-      <View style={styles.rowHead}>
-        <NumberBadge n={index + 1} muted />
-        <ThemedText type="rowTitle" style={styles.rowName}>
-          {line.name}
-        </ThemedText>
-        <MatchBadge value={line.p} />
-      </View>
-
-      <View style={styles.metaRow}>
-        {line.part_number ? (
-          <ThemedText type="small" themeColor="textSecondary" style={styles.partNumber}>
-            {line.part_number}
-          </ThemedText>
-        ) : null}
-        {line.qty > 1 ? (
-          <ThemedText type="smallBold" style={{ color: theme.badgeText }}>
-            ×{line.qty}
-          </ThemedText>
-        ) : null}
-      </View>
-
-      {line.reason ? (
-        <ThemedText type="small" themeColor="textSecondary">
-          {line.reason}
-        </ThemedText>
-      ) : null}
+  /**
+   * Observed damage. Compact, muted, no number — Partly saw it, so it is a
+   * fact and the row's job is just to name it.
+   */
+  const visibleLine = (line: ReportLine) => (
+    <View key={line.part_id} style={[styles.seenRow, { borderColor: theme.border }]}>
+      <Ionicons name="checkmark" size={15} color={theme.textSecondary} />
+      <ThemedText type="small" style={styles.rowName} numberOfLines={2}>
+        {line.name}
+        {line.qty > 1 ? ` ×${line.qty}` : ''}
+      </ThemedText>
     </View>
   );
 
@@ -185,9 +426,11 @@ export function CaseReportView({
       {/* Track A progress. Never blocks anything below it. */}
       {statusPill}
 
+      {/* Read first: the shape of the job before any row. */}
       {impact ? (
-        <ThemedText type="small" themeColor="textSecondary" style={styles.impact}>
-          Impact: {impact}
+        <ThemedText type="rowTitle" style={styles.impact}>
+          {impact} · {report.sections.visible.length} visible ·{' '}
+          {report.sections.order.length} predicted hidden
         </ThemedText>
       ) : null}
 
@@ -239,45 +482,79 @@ export function CaseReportView({
             ))}
           </View>
           <ThemedText type="small" themeColor="textSecondary">
-            Asked because answering moves the report more than anything else
-            {` (${report.question.value.toFixed(1)})`}.
+            Asked because answering moves the report more than anything else.
           </ThemedText>
         </Framed>
       ) : null}
 
-      {/* --- ✓ You can see these -------------------------------------------- */}
+      {/* --- Visible damage: facts, deliberately quiet --------------------- */}
       <View style={styles.sectionHead}>
-        <ThemedText type="section">You can see these</ThemedText>
+        <ThemedText type="section">Visible damage</ThemedText>
         <ThemedText type="small" themeColor="textSecondary">
-          {report.sections.visible.length} parts
+          {report.sections.visible.length}
         </ThemedText>
       </View>
+      <ThemedText type="small" themeColor="textSecondary" style={styles.sectionIntro}>
+        What the camera saw. Already confirmed — nothing to decide here.
+      </ThemedText>
       {report.sections.visible.length === 0 ? (
         <EmptyState message="Nothing recorded as visible yet." />
       ) : (
-        report.sections.visible.map(plainLine)
+        <View style={[styles.seenGroup, { borderColor: theme.border }]}>
+          {report.sections.visible.map(visibleLine)}
+        </View>
       )}
 
-      {/* --- + You'll also need these --------------------------------------- */}
+      {/* --- Hidden damage: the hero -------------------------------------- */}
       <View style={styles.sectionHead}>
-        <ThemedText type="section">You&apos;ll also need these</ThemedText>
+        <ThemedText type="section">Hidden damage — what we predict</ThemedText>
         <ThemedText type="small" themeColor="textSecondary">
-          {report.sections.order.length} parts
+          {report.sections.order.length}
         </ThemedText>
       </View>
+      <ThemedText type="small" themeColor="textSecondary" style={styles.sectionIntro}>
+        In no photo. Order these with the panels — tick or cross one and the parts behind
+        it move.
+      </ThemedText>
+
+      {/* So the tap registers as having moved the model, not just the one row. */}
+      {cascade.changes.size > 0 || cascade.departed > 0 ? (
+        <View style={[styles.cascadeNote, { borderColor: theme.accent }]}>
+          <Ionicons name="git-branch-outline" size={15} color={theme.accent} />
+          <ThemedText type="smallBold" style={{ color: theme.accent }}>
+            {cascade.changes.size + cascade.departed} part
+            {cascade.changes.size + cascade.departed === 1 ? '' : 's'} re-ranked
+            {cascade.departed > 0 ? ` · ${cascade.departed} dropped out` : ''}
+          </ThemedText>
+        </View>
+      ) : null}
       {report.sections.order.length === 0 ? (
         <EmptyState message="Nothing else implied yet." />
       ) : (
-        report.sections.order.map(plainLine)
+        <View style={styles.heroGroup}>
+          {report.sections.order.map((line, index) => (
+            <HiddenRow
+              key={line.part_id}
+              line={line}
+              index={index}
+              busy={busyId === line.part_id}
+              change={cascade.changes.get(line.part_id)}
+              onConfirm={onConfirm}
+            />
+          ))}
+        </View>
       )}
 
-      {/* --- ? Check these when it comes apart ------------------------------- */}
+      {/* --- Check on teardown: an action, not a list ---------------------- */}
       <View style={styles.sectionHead}>
-        <ThemedText type="section">Check these when it&apos;s off</ThemedText>
+        <ThemedText type="section">Check on teardown</ThemedText>
         <ThemedText type="small" themeColor="textSecondary">
-          {report.sections.check.length} to look at
+          {report.sections.check.length}
         </ThemedText>
       </View>
+      <ThemedText type="small" themeColor="textSecondary" style={styles.sectionIntro}>
+        Look at these when it&apos;s apart, in this order — each answer settles the most.
+      </ThemedText>
 
       {report.sections.check.map((line) => {
         const open = expanded === line.part_id;
@@ -293,19 +570,18 @@ export function CaseReportView({
               {line.inspection_rank != null ? <NumberBadge n={line.inspection_rank} /> : null}
               <ThemedText type="rowTitle" style={styles.rowName}>
                 {line.name}
+                {line.qty > 1 ? ` ×${line.qty}` : ''}
               </ThemedText>
-              <MatchBadge value={line.p} />
+              {/* Predicted, so it carries the numerical match badge. A part
+                  the repairer has already ticked or crossed is settled, and a
+                  percentage on a settled part is noise. */}
+              {line.confirmed == null ? <MatchBadge value={line.p} /> : null}
             </View>
 
             <View style={styles.metaRow}>
               {line.part_number ? (
                 <ThemedText type="small" themeColor="textSecondary" style={styles.partNumber}>
                   {line.part_number}
-                </ThemedText>
-              ) : null}
-              {line.qty > 1 ? (
-                <ThemedText type="smallBold" style={{ color: theme.badgeText }}>
-                  ×{line.qty}
                 </ThemedText>
               ) : null}
               {line.accessible === false ? (
@@ -360,54 +636,11 @@ export function CaseReportView({
             ) : null}
 
             {/* ✓ / ✗ are the only interaction: two taps, greasy hands. */}
-            {line.confirmed == null ? (
-              <View style={styles.answerRow}>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`Confirm ${line.name} is damaged`}
-                  disabled={busyId === line.part_id}
-                  onPress={() => onConfirm(line.part_id, true)}
-                  style={({ pressed }) => [
-                    styles.answerButton,
-                    { borderColor: theme.success, opacity: pressed ? 0.6 : 1 },
-                  ]}
-                >
-                  <Ionicons name="checkmark" size={20} color={theme.success} />
-                  <ThemedText type="smallBold" style={{ color: theme.success }}>
-                    Damaged
-                  </ThemedText>
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`Rule out ${line.name}`}
-                  disabled={busyId === line.part_id}
-                  onPress={() => onConfirm(line.part_id, false)}
-                  style={({ pressed }) => [
-                    styles.answerButton,
-                    { borderColor: theme.border, opacity: pressed ? 0.6 : 1 },
-                  ]}
-                >
-                  <Ionicons name="close" size={20} color={theme.textSecondary} />
-                  <ThemedText type="smallBold" themeColor="textSecondary">
-                    Not damaged
-                  </ThemedText>
-                </Pressable>
-              </View>
-            ) : (
-              <View style={styles.reviewedRow}>
-                <Ionicons
-                  name={line.confirmed ? 'checkmark-circle' : 'close-circle-outline'}
-                  size={18}
-                  color={line.confirmed ? theme.success : theme.textSecondary}
-                />
-                <ThemedText
-                  type="small"
-                  style={{ color: line.confirmed ? theme.success : theme.textSecondary }}
-                >
-                  {line.confirmed ? 'Confirmed damaged' : 'Ruled out'}
-                </ThemedText>
-              </View>
-            )}
+            <ConfirmRow
+              line={line}
+              busy={busyId === line.part_id}
+              onConfirm={onConfirm}
+            />
           </View>
         );
       })}
@@ -440,7 +673,63 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.two,
   },
   statusText: { flex: 1, fontWeight: '600' },
-  impact: { marginTop: -Spacing.three },
+  impact: { marginTop: -Spacing.two },
+
+  // A one-line "what this block is and what to do", under each heading.
+  sectionIntro: { marginTop: -Spacing.two },
+
+  // Observed damage: one bordered group of quiet rows rather than N cards, so
+  // it reads as a settled list and cannot be confused with the hero block.
+  seenGroup: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.chip,
+    paddingHorizontal: Spacing.three,
+  },
+  seenRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    paddingVertical: Spacing.two,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+
+  // Predicted damage: a heavier card with an accent edge. The weight is the
+  // point — this is the half of the screen the product is for.
+  // Cards abut so adjacent crop marks sit on one shared rule, the way the
+  // mockup stacks them.
+  heroGroup: { gap: 0 },
+  heroCard: {
+    paddingVertical: Spacing.four,
+    gap: Spacing.two,
+  },
+  heroCardStacked: { marginTop: -StyleSheet.hairlineWidth },
+  heroHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.three,
+  },
+  // Bigger and tighter than a plain row title: in the mockup the part name is
+  // clearly the focal point of its card, above the reason that explains it.
+  heroName: {
+    flex: 1,
+    fontSize: 19,
+    lineHeight: 25,
+    fontWeight: '800',
+    letterSpacing: -0.3,
+  },
+  heroReason: { fontSize: 16, lineHeight: 24 },
+  hardwareList: { paddingLeft: Spacing.four, gap: Spacing.half },
+  deltaRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one },
+  cascadeNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    alignSelf: 'flex-start',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.round,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
+  },
 
   saidBlock: { gap: Spacing.two },
   saidChip: {

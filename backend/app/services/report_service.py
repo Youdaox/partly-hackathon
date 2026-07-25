@@ -1,12 +1,10 @@
 """Engine output -> the canonical report payload of spec 6.6.
 
-Two jobs beyond plain serialisation.
-
-Deduplication: the catalogue lists a part once per fitted position, so a front
-corner can contain five rows all called "Right Front Guard Grommet" with
-different part ids. Five identical lines is not a report anyone reads, so
-identical (name, part_number) pairs collapse into one line carrying a quantity.
-The engine still reasons over them separately — this is presentation only.
+Deduplication and hardware grouping both happen upstream in `engines.buckets`,
+before the section caps, because a cap that sees six copies of one grommet
+gives six slots to one grommet. This module serialises what it is handed and
+adds the catalogue lookups (diagram, hotspot) the engine has no business
+knowing about.
 
 Payload size: spec 6.8 caps the response at 20 KB, which the section caps plus
 attribution truncation keep it under.
@@ -18,6 +16,8 @@ from app.catalogue import registry
 from app.catalogue.registry import Catalogue
 from app.engines.orchestrator import Report
 from app.engines.types import Inspection, Part, Prediction
+from app.services import media_service
+from app.store import cases
 from app.store.cases import Case, Vehicle
 
 MAX_ATTRIBUTION = 3
@@ -41,30 +41,27 @@ def _line(part: Part, prediction: Prediction, qty: int, slug: str | None = None)
     return line
 
 
-def _dedupe(
+def _attribution(prediction: Prediction) -> list[dict]:
+    """The causes behind one probability, strongest first."""
+    return [
+        {"cause": cause.cause, "relation": cause.relation, "share": cause.share}
+        for cause in prediction.attribution[:MAX_ATTRIBUTION]
+    ]
+
+
+def _rows(
     predictions: list[Prediction],
     catalogue: Catalogue,
+    quantity: dict[str, int] | None = None,
 ) -> list[tuple[Part, Prediction, int]]:
-    """Collapse identically-named parts, keeping the strongest probability."""
-    grouped: dict[tuple[str, str | None], tuple[Part, Prediction, int]] = {}
-    order: list[tuple[str, str | None]] = []
-
+    """Pair each prediction with its part and the quantity buckets computed."""
+    quantity = quantity or {}
+    rows = []
     for prediction in predictions:
         part = catalogue.by_id.get(prediction.part_id)
-        if part is None:
-            continue
-        key = (part.name, part.part_number)
-        existing = grouped.get(key)
-        if existing is None:
-            grouped[key] = (part, prediction, part.quantity)
-            order.append(key)
-        else:
-            kept_part, kept_prediction, qty = existing
-            best = prediction if prediction.p > kept_prediction.p else kept_prediction
-            best_part = part if prediction.p > kept_prediction.p else kept_part
-            grouped[key] = (best_part, best, qty + part.quantity)
-
-    return [grouped[key] for key in order]
+        if part is not None:
+            rows.append((part, prediction, quantity.get(part.part_id, part.quantity)))
+    return rows
 
 
 def build(
@@ -84,6 +81,10 @@ def build(
         },
         "question": None,
         "sections": {"visible": [], "order": [], "check": []},
+        "consumables": [],
+        # What the repairer uploaded. Recorded and listed only — the prediction
+        # comes from the shipped Interpreter output, not from these frames.
+        "media": [media_service.payload(asset) for asset in cases.uploaded_media(case)],
     }
 
     if report is None or catalogue is None:
@@ -91,22 +92,48 @@ def build(
         return payload
 
     inspections: dict[str, Inspection] = {i.part_id: i for i in report.inspections}
+    sections = report.sections
+    quantity = sections.quantity
 
     slug = catalogue.slug
-    payload["sections"]["visible"] = [
-        _line(part, prediction, qty, slug)
-        for part, prediction, qty in _dedupe(report.sections.visible, catalogue)
-    ]
+
+    def hardware_for(part: Part) -> list[dict]:
+        """The fasteners and sub-components that come with one line."""
+        return [
+            _line(child_part, child, child_qty, slug)
+            for child_part, child, child_qty in _rows(
+                sections.hardware.get(part.part_id, []), catalogue, quantity
+            )
+        ]
+
+    visible_lines = []
+    for part, prediction, qty in _rows(sections.visible, catalogue, quantity):
+        line = _line(part, prediction, qty, slug)
+        line["hardware"] = hardware_for(part)
+        visible_lines.append(line)
+    payload["sections"]["visible"] = visible_lines
 
     order_lines = []
-    for part, prediction, qty in _dedupe(report.sections.order, catalogue):
+    for part, prediction, qty in _rows(sections.order, catalogue, quantity):
         line = _line(part, prediction, qty, slug)
         line["reason"] = prediction.reason
+        line["hardware"] = hardware_for(part)
+        # The decomposition behind `reason`, so the client can show the whole
+        # chain rather than only the strongest link.
+        line["attribution"] = _attribution(prediction)
         order_lines.append(line)
     payload["sections"]["order"] = order_lines
 
+    # Fasteners whose parent is not in the report. One group beats N lines that
+    # all say "a clip from the front of the car". Kept out of `sections` so the
+    # spec 6.6 triple stays exactly the triple the client already parses.
+    payload["consumables"] = [
+        _line(part, prediction, qty, slug)
+        for part, prediction, qty in _rows(sections.consumables, catalogue, quantity)
+    ]
+
     check_lines = []
-    for part, prediction, qty in _dedupe(report.sections.check, catalogue):
+    for part, prediction, qty in _rows(sections.check, catalogue, quantity):
         line = _line(part, prediction, qty, slug)
         line["reason"] = prediction.reason
         line["confirmed"] = case.confirmations.get(part.part_id)
@@ -115,10 +142,7 @@ def build(
             line["inspection_rank"] = inspection.rank
             line["inspection_value"] = inspection.value
             line["accessible"] = inspection.accessible
-        line["attribution"] = [
-            {"cause": cause.cause, "relation": cause.relation, "share": cause.share}
-            for cause in prediction.attribution[:MAX_ATTRIBUTION]
-        ]
+        line["attribution"] = _attribution(prediction)
         check_lines.append(line)
     payload["sections"]["check"] = check_lines
 
@@ -202,6 +226,9 @@ def vehicle_payload(vehicle: Vehicle) -> dict:
         "market": vehicle.market,
         "steering": vehicle.steering,
         "parts_indexed": vehicle.parts_indexed,
+        # The prediction is a walk over these, so the client can say what was
+        # actually loaded rather than just how many parts exist.
+        "edges_indexed": vehicle.edges_indexed,
         "resolved_ms": vehicle.resolved_ms,
     }
 
@@ -214,7 +241,9 @@ def damage_payload(case: Case, catalogue: Catalogue | None, report: Report | Non
         for observation in case.observations:
             if observation.part_id:
                 sources_by_part.setdefault(observation.part_id, set()).add(observation.source)
-        for part, prediction, qty in _dedupe(report.sections.visible, catalogue):
+        for part, prediction, qty in _rows(
+            report.sections.visible, catalogue, report.sections.quantity
+        ):
             line = _line(part, prediction, qty, catalogue.slug)
             line["sources"] = sorted(sources_by_part.get(part.part_id, set()))
             visible.append(line)

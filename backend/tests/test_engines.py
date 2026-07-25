@@ -286,7 +286,8 @@ def test_a_question_is_never_asked_twice():
     question = counterfactual.next_question(
         parts, edges, evidence, predictions,
         conflicts=[{"field": "side", "values": ["L", "R"]}],
-        asked=frozenset({"q_side", "q_wheels", "q_airbags", "q_door"}),
+        # A live side conflict, but the side has already been settled once.
+        asked=frozenset({"q_side"}),
     )
     assert question is None
 
@@ -335,7 +336,11 @@ def test_dedupe_runs_before_the_cap_not_after():
     sections = buckets.split(predictions, parts)
     order_ids = {p.part_id for p in sections.order}
     assert "real" in order_ids, "a distinct part must not be crowded out by duplicate rows"
-    assert len(sections.order) == 2, "six duplicate rows must collapse to one"
+    # The six grommets collapse to one, and that one is a fastener, so it is
+    # grouped rather than given a slot of its own — leaving the order bucket to
+    # the distinct part the duplicates used to bury.
+    assert len(sections.order) == 1
+    assert len(sections.consumables) == 1, "six duplicate rows must collapse to one"
 
 
 def test_rejected_parts_leave_the_report(chain):

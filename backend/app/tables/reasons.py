@@ -2,7 +2,30 @@
 
 Written to be read out loud in a workshop, not to be defensible in a report.
 Short, concrete, and about *this* part's relationship to the damage.
+
+These are the fallback. When a part is on the list because of something *else*
+on the list, the line says so and names it (RELATION_REASON below), because a
+klass template cannot: every headlamp bracket on the Yaris read "behind the
+lamp you've already lost" whether it was there because of the right headlamp,
+the left one, or the impact reaching it directly. The template is used when the
+direct (root) term dominates — which is the case where "the impact reached it"
+really is the whole explanation.
+
+Phrasing is deliberately direction-neutral. `mounts` means "one carries the
+other" without saying which way round, so "bolted to X" is true for a bracket
+under a lamp and for a liner under a guard; "carries X" would be wrong for one
+of them.
 """
+
+# relation -> how to say "because of X" for that kind of connection.
+RELATION_REASON: dict[str, str] = {
+    "mounts": "bolted to {cause}",
+    "hardware": "comes off with {cause}",
+    "sub_assembly": "part of {cause}",
+    "load_path": "in the load path behind {cause}",
+    "adjacent": "right next to {cause}",
+    "harness": "routed through {cause}",
+}
 
 REASONS: dict[str, str] = {
     "cover_retainer": "snaps when the cover comes off",

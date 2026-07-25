@@ -160,8 +160,16 @@ def test_an_invented_option_is_rejected(client):
 
 def test_no_catalogue_vehicle_cannot_be_quoted(client):
     """Must be a real failure status, not the 200 that `catalogue_unavailable`
-    defaults to — otherwise the client renders a QR code pointing nowhere."""
-    case_id = make_case(client, "NUE975")
+    defaults to — otherwise the client renders a QR code pointing nowhere.
+
+    Registration no longer lets an uncatalogued plate through the front door,
+    so the vehicle is resolved directly here. The guard under test is the one
+    in send-to-customer, and it has to hold however the case arrived.
+    """
+    vehicle = vehicle_service.resolve(cases.create_vehicle("NUE975"))
+    assert vehicle.status == "no_catalogue"
+    case_id = client.post("/v1/case", json={"vehicle_id": vehicle.id}).json()["case_id"]
+
     response = client.post(f"/v1/case/{case_id}/send-to-customer")
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "catalogue_unavailable"

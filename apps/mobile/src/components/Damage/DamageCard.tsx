@@ -30,7 +30,10 @@ export function DamageCard({ region, onPress }: DamageCardProps) {
       <ThemedText type="small" themeColor="textSecondary">
         {region.description}
       </ThemedText>
-      <ConfidenceBar value={region.confidence} />
+      {/* Observed = no number, predicted = number. A visible part was seen; a
+          percentage next to it reads as hedging about a fact, and it blurs the
+          one distinction this screen exists to make. */}
+      {region.damageType === 'invisible' ? <ConfidenceBar value={region.confidence} /> : null}
     </Card>
   );
 

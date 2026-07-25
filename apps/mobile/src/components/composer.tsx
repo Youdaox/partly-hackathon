@@ -42,6 +42,13 @@ export interface ComposerProps {
   placeholder?: string;
   /** Shows a spinner on the send button and blocks submission. */
   busy?: boolean;
+  /**
+   * Whether send is available, when typed text is not the only thing that
+   * makes it so. The damage screen sends attachments with no words at all —
+   * gating the arrow on text meant you had to type something to upload a
+   * photo. Left unset, text alone decides, as it does for a follow-up.
+   */
+  canSend?: boolean;
   /** Left `+` affordance. Omitted when not given. */
   onPlusPress?: () => void;
   onMicPress?: () => void;
@@ -56,8 +63,9 @@ export function Composer({
   value,
   onChangeText,
   onSubmit,
-  placeholder = 'Describe the vehicle and damage',
+  placeholder = 'Ask a follow-up…',
   busy = false,
+  canSend,
   onPlusPress,
   onMicPress,
   micActive = false,
@@ -81,6 +89,8 @@ export function Composer({
   const inputStyle = useAnimatedStyle(() => ({ height: height.value }));
 
   const hasText = value.trim().length > 0;
+  /** Text is the default reason to send, not the only possible one. */
+  const sendable = canSend ?? hasText;
 
   // Once the text exceeds the cap, let the input scroll rather than grow.
   const scrollable = contentHeight > maxHeight;
@@ -99,12 +109,12 @@ export function Composer({
   );
 
   const submit = useCallback(() => {
-    if (!hasText || busy) return;
+    if (!sendable || busy) return;
     onSubmit();
     // Collapse straight back to a pill; the text is gone, so the reported content size
     // will not fire again on its own.
     setContentHeight(minHeight);
-  }, [hasText, busy, onSubmit, minHeight]);
+  }, [sendable, busy, onSubmit, minHeight]);
 
   return (
     <View
@@ -170,11 +180,11 @@ export function Composer({
         accessibilityRole="button"
         accessibilityLabel="Send"
         onPress={submit}
-        disabled={!hasText || busy}
+        disabled={!sendable || busy}
         style={({ pressed }) => [
           styles.send,
           {
-            backgroundColor: hasText ? theme.accent : theme.backgroundSelected,
+            backgroundColor: sendable ? theme.accent : theme.backgroundSelected,
             opacity: pressed ? 0.8 : 1,
           },
         ]}
@@ -185,7 +195,7 @@ export function Composer({
           <Ionicons
             name="arrow-up"
             size={20}
-            color={hasText ? theme.accentText : theme.textSecondary}
+            color={sendable ? theme.accentText : theme.textSecondary}
           />
         )}
       </Pressable>
@@ -219,7 +229,8 @@ const styles = StyleSheet.create({
   send: {
     width: 36,
     height: 36,
-    borderRadius: Radius.round,
+    // A rounded square, per the mockups — the circle read as a chat avatar.
+    borderRadius: Radius.chip + 4,
     alignItems: 'center',
     justifyContent: 'center',
   },

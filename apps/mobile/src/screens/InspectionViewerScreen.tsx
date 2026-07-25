@@ -77,9 +77,11 @@ export default function InspectionViewerScreen() {
   return (
     <ThemedView style={styles.container}>
       <View style={[styles.header, { borderBottomColor: theme.border }]}>
-        <ThemedText type="smallBold">{params.vehicleLabel ?? 'Toyota Corolla 2022'}</ThemedText>
+        {/* The fallback is the demo vehicle, so this screen and the prediction
+            flow name the same car when no params are passed. */}
+        <ThemedText type="smallBold">{params.vehicleLabel ?? 'Toyota Yaris 2023 · QMN16'}</ThemedText>
         <ThemedText type="small" themeColor="textSecondary">
-          {params.assessment ?? 'Front collision assessment'}
+          {params.assessment ?? 'Front-right collision assessment'}
         </ThemedText>
       </View>
 

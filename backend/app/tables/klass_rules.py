@@ -16,6 +16,13 @@ KLASS_RULES: list[tuple[str, str]] = [
     (r"cover retainer|bumper retainer|retainer", "cover_retainer"),
     (r"\bclip\b|grommet|pin hold|rivet|\bclamp\b", "clip"),
     (r"\bbolt\b|\bnut\b|\bscrew\b|\bstud\b|washer for|hardware part", "clip"),
+    # A seal or gasket is consumed by the panel coming off, exactly like a
+    # retainer, so it belongs in this block rather than in the catch-alls it
+    # used to sit in. Down there the assembly nouns reached it first and a lamp
+    # gasket came back as klass `headlamp` — which made it a `mounts` source,
+    # and the report explained a bracket with "bolted to Left Headlamp Lens
+    # Gasket".
+    (r"\bseal\b|weatherstrip|gasket", "seal"),
     # --- brackets: must precede the component they carry --------------------
     (r"headlamp bracket|head lamp bracket|lamp bracket", "lamp_bracket"),
     (r"bumper (side )?stay|bumper arm|bumper extension", "crash_box"),
@@ -46,6 +53,17 @@ KLASS_RULES: list[tuple[str, str]] = [
     (r"moulding|molding|garnish|protector|\bstrip\b", "moulding"),
     (r"mudguard|mud flap|mudflap", "mudflap"),
     # --- lighting -----------------------------------------------------------
+    # A lamp's relay is not the lamp, the same way its harness is not. Left in
+    # `fog_lamp` it became a `mounts` source, so the report explained a headlamp
+    # bracket with "Left Fog Lamp Relay" — a relay holding up a bracket.
+    (r"\brelay\b|fuse ?box|junction block", "harness"),
+    # Nor is a lamp's bulb the lamp. EDGE_PRIOR fires (headlamp -> lamp_bracket,
+    # mounts) at λ 0.70, so with a bulb classed as `headlamp` the report
+    # explained a bracket with "bolted to Left Headlight Bulb (Single)". Bulbs
+    # still travel with the lamp — they hang off it by `sub_assembly`, which is
+    # what nests them in the report — they just stop being something a bracket
+    # can be bolted to.
+    (r"\bbulb\b|\bglobe\b|bulb socket|terminal boot", "harness"),
     (r"fog lamp|fog light|driving lamp", "fog_lamp"),
     (r"head ?lamp|head ?light", "headlamp"),
     (r"tail ?lamp|tail ?light|rear combination lamp|stop lamp", "tail_lamp"),
@@ -61,6 +79,17 @@ KLASS_RULES: list[tuple[str, str]] = [
     (r"bonnet|hood panel|\bhood\b", "bonnet"),
     # --- outer panels -------------------------------------------------------
     (r"fender liner|guard liner|wheel arch liner|wheelhouse liner", "fender_liner"),
+    # Two specific components that must beat the generic panel noun below.
+    # `classify` matches against the name *and* the OEM std_note, and this
+    # catalogue files parts under the assembly they belong to rather than what
+    # they are: "Right Front Strut Tower" carries the note "APRON SUB-ASSY,
+    # FRONT FENDER, REAR RH", so with `fender` first a suspension tower came
+    # back as a depth-1 body panel, priced and reasoned about as one. The seal
+    # rule has the mirror problem — the name says "Front Guard ... Seal" and
+    # only the note ("SEAL, FRONT FENDER TO COWL SIDE") says what it is. Both
+    # sit here for the reason in this file's docstring: specific before generic.
+    (r"strut tower|suspension tower|shock tower", "strut_tower"),
+    (r"apron|inner guard|wheelhouse", "apron"),
     (r"fender|front guard|quarter panel", "fender"),
     (r"under ?cover|under ?shield|engine under", "undercover"),
     (r"door panel|door shell|door outer", "door_panel"),
@@ -73,8 +102,6 @@ KLASS_RULES: list[tuple[str, str]] = [
     (r"sensor|camera|radar", "sensor"),
     # --- structure ----------------------------------------------------------
     (r"side member|frame side rail|chassis rail", "side_member"),
-    (r"apron|inner guard|wheelhouse", "apron"),
-    (r"strut tower|suspension tower|shock tower", "strut_tower"),
     (r"suspension (control )?arm|lower arm|upper arm|control arm", "suspension_arm"),
     (r"steering knuckle|hub carrier|upright", "steering_knuckle"),
     (r"steering rack|steering gear|tie rod", "steering_rack"),
@@ -88,7 +115,6 @@ KLASS_RULES: list[tuple[str, str]] = [
     (r"\becu\b|control module|computer assembly", "ecu"),
     (r"firewall|dash panel|cowl panel|cowl", "firewall"),
     # --- catch-alls: last on purpose ---------------------------------------
-    (r"\bseal\b|weatherstrip|gasket", "seal"),
     (r"reinforcement", "reinforcement_beam"),
     # Generic bracket: deliberately its own klass, not lamp_bracket. Absorbing
     # every unqualified "... Bracket" into the headlamp mount would put hundreds
@@ -121,6 +147,13 @@ ZONE_RULES: list[tuple[str, str]] = [
     # zone="other" gets zone_factor 0 and candidate_set drops it unconditionally
     # (physics.py), so this was not a scoring error — those parts could never
     # appear in a report at all, at any severity.
+    # A rear fog lamp is at the rear. The front rule below claims every
+    # "fog lamp" outright — which is what put "Left Rear Fog Lamp Assembly" in
+    # the Santa Fe's front-impact order list. Matched as whole phrases rather
+    # than by moving `\brear\b` above the front rule, because plenty of genuine
+    # front parts carry a positional "- Rear" suffix ("Right Front Guard Liner
+    # Insulator - Rear") and would be thrown out of the front zone with it.
+    (r"rear fog\s?lamp|rear fog\s?light|rear combination lamp", "rear"),
     (r"\bfront\b|\bbonnet\b|\bhood\b|radiator|head\s?lamp|head\s?light|fog\s?lamp|fog\s?light", "front"),
     (r"\brear\b|\bboot\b|\btrunk\b|tailgate|tail\s?lamp|tail\s?light", "rear"),
 ]
