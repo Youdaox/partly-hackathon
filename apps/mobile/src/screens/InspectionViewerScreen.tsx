@@ -139,7 +139,10 @@ export default function InspectionViewerScreen() {
           <ScrollView contentContainerStyle={styles.summaryList}>
             {activeRegions.map((region) => (
               <DamageCard
-                key={region.meshName}
+                // Two parts can share one overlay region — the right headlamp
+                // and the bracket behind it are the same place on the car — so
+                // the mesh name alone is not unique with both toggles on.
+                key={`${region.meshName}-${region.partName}`}
                 region={region}
                 onPress={() => openFromSummary(region.meshName)}
               />

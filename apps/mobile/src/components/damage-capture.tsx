@@ -44,8 +44,10 @@ import type { VehiclePayload } from '@/lib/backend';
 
 const BEAT_MS = 700;
 
-/** The backend caps one upload request at 10 files (`media_service`). */
-const MAX_ATTACHMENTS = 10;
+// No cap on how many photos go with a case. A repairer walks a wrecked car and
+// shoots every angle; the count is whatever the damage takes. The backend has
+// no per-request limit either (`media_service.MAX_FILES_PER_REQUEST`), so this
+// screen does not invent one.
 
 interface Attachment {
   kind: 'image' | 'video';
@@ -106,25 +108,7 @@ export function DamageCapture({
 
   const add = useCallback(
     (picked: ImagePicker.ImagePickerAsset[]) => {
-      // Checked here rather than inside the state updater: an updater must be
-      // pure, and React may run it twice — which would fire the message twice.
-      // Said here rather than letting the upload come back 413.
-      const room = MAX_ATTACHMENTS - count;
-      if (room <= 0) {
-        setError({
-          title: `That's ${MAX_ATTACHMENTS} files`,
-          detail: 'Send these first, then add more to the same case.',
-        });
-        return;
-      }
-      if (picked.length > room) {
-        setError({
-          title: `Added the first ${room}`,
-          detail: `A case takes ${MAX_ATTACHMENTS} files at a time.`,
-        });
-      }
-
-      const next = picked.slice(0, room).map((asset, i) => {
+      const next = picked.map((asset, i) => {
         const kind: 'image' | 'video' = asset.type === 'video' ? 'video' : 'image';
         return {
           kind,
@@ -161,7 +145,9 @@ export function DamageCapture({
         // slowest part of the job. `allowsEditing` is deliberately unset: it is
         // mutually exclusive with multi-select and silently forces single.
         allowsMultipleSelection: true,
-        selectionLimit: MAX_ATTACHMENTS,
+        // 0 is expo-image-picker's "as many as you like" on iOS; web's file
+        // input has no limit to express.
+        selectionLimit: 0,
         videoMaxDuration: 120,
       });
       if (!result.canceled) add(result.assets);
@@ -322,7 +308,7 @@ export function DamageCapture({
 
       {/* Adding a second batch without reopening the menu. Photos come off a
           phone in handfuls and the count is easy to get wrong first time. */}
-      {!dimmed && attachments.length < MAX_ATTACHMENTS ? (
+      {!dimmed ? (
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Add more photos"
@@ -335,7 +321,7 @@ export function DamageCapture({
         >
           <Ionicons name="add" size={22} color={theme.iconMuted} />
           <ThemedText type="small" themeColor="textSecondary">
-            {attachments.length}/{MAX_ATTACHMENTS}
+            {attachments.length}
           </ThemedText>
         </Pressable>
       ) : null}

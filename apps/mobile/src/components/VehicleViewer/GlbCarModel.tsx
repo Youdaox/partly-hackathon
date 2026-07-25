@@ -58,9 +58,20 @@ export function GlbCarModel({
   const gltf = useGLTF(MODEL_SOURCE as never) as unknown as { scene: THREE.Object3D };
   const scene = useMemo(() => gltf.scene, [gltf]);
 
+  // Only highlighted parts are clickable, so they are the candidate set the
+  // nearest-point search resolves against — see nearestExteriorMesh's note on
+  // why restricting it is what makes "nearest" reliable.
+  const eligibleMeshNames = useMemo(
+    () => activeRegions.map((region) => region.meshName),
+    [activeRegions],
+  );
+
   const handleBodyPointerDown = (event: ThreeEvent<PointerEvent>) => {
     event.stopPropagation();
-    const meshName = nearestExteriorMesh([event.point.x, event.point.y, event.point.z]);
+    const meshName = nearestExteriorMesh(
+      [event.point.x, event.point.y, event.point.z],
+      eligibleMeshNames,
+    );
     if (meshName) onSelectPart(meshName);
   };
 

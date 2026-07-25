@@ -21,8 +21,13 @@ from app.store.cases import Case, MediaAsset
 MAX_IMAGE_BYTES = 12 * 1024 * 1024
 MAX_VIDEO_BYTES = 200 * 1024 * 1024
 MAX_VIDEO_SECONDS = 120
-MAX_FILES_PER_REQUEST = 10
 MAX_KEYFRAMES = 8
+
+# How many files one request may carry. `None` means no limit: a repairer
+# walking a wrecked car photographs it from every angle, and being told to
+# split that into batches of ten is an arbitrary obstacle — the per-file size
+# limits above are the ones that protect the server.
+MAX_FILES_PER_REQUEST: int | None = None
 
 IMAGE_MIMES = {"image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"}
 VIDEO_MIMES = {"video/mp4", "video/quicktime", "video/webm", "video/x-m4v"}

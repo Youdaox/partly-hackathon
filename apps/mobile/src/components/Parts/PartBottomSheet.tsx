@@ -87,9 +87,20 @@ export function PartBottomSheet({
               <ThemedText type="default">{region.description}</ThemedText>
             </Section>
 
-            <Section label="Confidence">
-              <ConfidenceBar value={region.confidence} />
-            </Section>
+            {/* Observed = no number, predicted = number. A part Partly saw in
+                the photo is a fact, and a percentage beside it reads as
+                hedging about something not in doubt. DamageCard, the parts
+                list and the web quote all follow this; the rule was lost here
+                in a merge and is restored rather than dropped everywhere else. */}
+            {region.damageType === 'invisible' ? (
+              <Section label="Likelihood">
+                <ConfidenceBar value={region.confidence} />
+              </Section>
+            ) : (
+              <Section label="Status">
+                <ThemedText type="default">Detected in the photos by Partly</ThemedText>
+              </Section>
+            )}
 
             <Section label="AI Insight">
               <View style={[styles.insightCard, { backgroundColor: theme.backgroundElement }]}>

@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 
 from app.catalogue import registry
 from app.main import create_app
-from app.services import vehicle_service
+from app.services import media_service, vehicle_service
 from app.store import cases
 from app.tables import rego_map
 from app.tables.rego_map import REGO_MAP
@@ -438,10 +438,38 @@ def test_unknown_media_404s(client):
     assert client.get("/v1/media/med_nope").status_code == 404
 
 
-def test_too_many_files_in_one_request_is_rejected(client):
+def test_a_whole_walkaround_uploads_in_one_request(client):
+    """There is no cap on how many files one request may carry.
+
+    There used to be one of ten, which is fewer photos than a repairer takes
+    walking around a wrecked car — it made them split a single walkaround into
+    batches for no reason the server cared about. The per-file size limits are
+    what actually protect anything, and those stay.
+    """
     _, created = make_case(client)
     case_id = created.json()["case_id"]
-    response = _upload(client, case_id, *[f"{i}.jpg" for i in range(11)])
+
+    response = _upload(client, case_id, *[f"angle-{i}.jpg" for i in range(25)])
+    assert response.status_code == 202, response.text
+    assert len(response.json()["media_ids"]) == 25
+
+    tracked = client.get(f"/v1/case/{case_id}/media").json()["media"]
+    assert len(tracked) == 25
+    assert len({asset["media_id"] for asset in tracked}) == 25
+    assert tracked[0]["filename"] == "angle-0.jpg"
+
+
+def test_an_oversized_file_is_still_rejected(client):
+    """Dropping the count limit does not drop the size limit."""
+    _, created = make_case(client)
+    case_id = created.json()["case_id"]
+    huge = JPEG + b"\x00" * (media_service.MAX_IMAGE_BYTES + 1)
+
+    response = client.post(
+        "/v1/media/upload",
+        data={"case_id": case_id, "kind": "image"},
+        files=[("files", ("huge.jpg", huge, "image/jpeg"))],
+    )
     assert response.status_code == 413
     assert response.json()["error"]["code"] == "media_too_large"
 
