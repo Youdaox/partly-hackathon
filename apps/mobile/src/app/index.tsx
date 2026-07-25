@@ -58,6 +58,17 @@ export default function HomeScreen() {
   const kase = useCase(caseId, pending?.vehicleId ?? null);
 
   /**
+   * How many parts are settled enough to quote: everything the camera saw, plus anything
+   * ticked ✓. It is the number the review screen will open with, so the button says it.
+   */
+  const confirmedCount = kase.report
+    ? kase.report.sections.visible.length +
+      [...kase.report.sections.order, ...kase.report.sections.check].filter(
+        (line) => line.confirmed === true,
+      ).length
+    : 0;
+
+  /**
    * Step 1 done — the plate was accepted, and that is all. The VIN, the
    * catalogue and the case are still to come; screen 2 opens now and the
    * lookup runs behind it.
@@ -168,17 +179,30 @@ export default function HomeScreen() {
         options={{
           title,
           headerTitleAlign: 'center',
-          headerLeft: () => (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Open recent cases"
-              onPress={() => setMenuOpen(true)}
-              hitSlop={12}
-              style={styles.headerButton}
-            >
-              <Ionicons name="menu" size={24} color={theme.accent} />
-            </Pressable>
-          ),
+          // Back once there is a step to go back to, the drawer otherwise. The three
+          // steps live on one route, so this walks them rather than popping a screen.
+          headerLeft: () =>
+            step === 'rego' ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Open recent cases"
+                onPress={() => setMenuOpen(true)}
+                hitSlop={12}
+                style={styles.headerButton}
+              >
+                <Ionicons name="menu" size={24} color={theme.accent} />
+              </Pressable>
+            ) : (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={step === 'report' ? 'Back to adding damage' : 'Back to the rego'}
+                onPress={() => setStep(step === 'report' ? 'photos' : 'rego')}
+                hitSlop={12}
+                style={styles.headerButton}
+              >
+                <Ionicons name="chevron-back" size={26} color={theme.accent} />
+              </Pressable>
+            ),
           headerRight: () =>
             step !== 'rego' ? (
               <Pressable
@@ -268,7 +292,8 @@ export default function HomeScreen() {
                   style={({ pressed }) => [styles.dockLink, { opacity: pressed ? 0.6 : 1 }]}
                 >
                   <ThemedText type="smallBold" style={{ color: theme.accent }}>
-                    Send to customer
+                    Review &amp; confirm list
+                    {confirmedCount > 0 ? ` (${confirmedCount})` : ''}
                   </ThemedText>
                   <Ionicons name="chevron-forward" size={15} color={theme.accent} />
                 </Pressable>

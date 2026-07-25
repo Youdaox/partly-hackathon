@@ -99,6 +99,15 @@ function useCascade(report: CaseReport | null) {
   const previousOrder = useRef<Set<string>>(new Set());
   const [changes, setChanges] = useState<Map<string, Change>>(new Map());
   const [departed, setDeparted] = useState(0);
+  /**
+   * Parts that were not in the previous report at all.
+   *
+   * Answering the side question is the case that made this necessary: it flips the impact
+   * from right to left, and the list swaps six parts for six others. Almost nothing
+   * *moves* — the change is entirely arrivals and departures, so diffing probabilities
+   * alone reported "nothing changed" on the one interaction that changes the most.
+   */
+  const [arrived, setArrived] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!report) return;
@@ -126,19 +135,22 @@ function useCascade(report: CaseReport | null) {
     // Parts that fell out of the order bucket moved the most of all, and are
     // no longer on screen to say so themselves.
     const gone = [...beforeOrder].filter((partId) => !nowOrder.has(partId)).length;
+    const fresh = new Set([...now.keys()].filter((partId) => !before.has(partId)));
 
     setChanges(moved);
     setDeparted(gone);
-    if (moved.size === 0 && gone === 0) return;
+    setArrived(fresh);
+    if (moved.size === 0 && gone === 0 && fresh.size === 0) return;
 
     const timer = setTimeout(() => {
       setChanges(new Map());
       setDeparted(0);
+      setArrived(new Set());
     }, CASCADE_HIGHLIGHT_MS);
     return () => clearTimeout(timer);
   }, [report]);
 
-  return { changes, departed };
+  return { changes, departed, arrived };
 }
 
 type SectionKey = 'confirmed' | 'unconfirmed' | 'predicted';
@@ -376,13 +388,6 @@ export function CaseReportView({
     <ScrollView contentContainerStyle={styles.list} keyboardShouldPersistTaps="handled">
       {statusPill}
 
-      {said ? (
-        <View style={styles.saidBlock}>
-          <SectionLabel>YOU SAID</SectionLabel>
-          <ThemedText>{said}</ThemedText>
-        </View>
-      ) : null}
-
       {error ? <ErrorNotice title={error.title} detail={error.detail} /> : null}
 
       {report.degraded ? (
@@ -395,11 +400,11 @@ export function CaseReportView({
       {/* The job in one line, with a chip per group. Crop-marked because it is the one
           block on the screen that summarises rather than lists. */}
       <Framed style={styles.flagged}>
-        <ThemedText type="section">
+        <ThemedText type="section" style={styles.centred}>
           {flagged} part{flagged === 1 ? '' : 's'} flagged
         </ThemedText>
         {impact ? (
-          <ThemedText type="small" themeColor="textSecondary">
+          <ThemedText type="small" themeColor="textSecondary" style={styles.centred}>
             {impact}
           </ThemedText>
         ) : null}
@@ -465,13 +470,17 @@ export function CaseReportView({
       ) : null}
 
       {/* So the tap registers as having moved the model, not just the one row. */}
-      {cascade.changes.size > 0 || cascade.departed > 0 ? (
+      {cascade.changes.size > 0 || cascade.departed > 0 || cascade.arrived.size > 0 ? (
         <View style={[styles.cascadeNote, { borderColor: theme.accent }]}>
           <Ionicons name="git-branch-outline" size={15} color={theme.accent} />
           <ThemedText type="smallBold" style={{ color: theme.accent }}>
-            {cascade.changes.size + cascade.departed} part
-            {cascade.changes.size + cascade.departed === 1 ? '' : 's'} re-ranked
-            {cascade.departed > 0 ? ` · ${cascade.departed} dropped out` : ''}
+            {[
+              cascade.arrived.size > 0 ? `${cascade.arrived.size} new` : null,
+              cascade.changes.size > 0 ? `${cascade.changes.size} re-ranked` : null,
+              cascade.departed > 0 ? `${cascade.departed} dropped out` : null,
+            ]
+              .filter(Boolean)
+              .join(' · ')}
           </ThemedText>
         </View>
       ) : null}
@@ -509,36 +518,76 @@ export function CaseReportView({
             </Pressable>
 
             {open
-              ? group.lines.map((line) => (
-                  <View
-                    key={line.part_id}
-                    style={[styles.groupRow, { borderTopColor: theme.border }]}
-                  >
-                    <View style={styles.groupRowHead}>
-                      <ThemedText style={styles.grow} numberOfLines={2}>
-                        {line.name}
-                        {line.qty > 1 ? (
-                          <ThemedText type="smallBold" style={{ color: theme.textSecondary }}>
-                            {'  '}×{line.qty}
-                          </ThemedText>
+              ? group.lines.map((line) => {
+                  // What the last answer or tick did to this row. Tinting it is the whole
+                  // proof that one answer moves the model, not just the row you touched.
+                  const change = cascade.changes.get(line.part_id);
+                  const isNew = cascade.arrived.has(line.part_id);
+                  const dropped = change != null && change.to < change.from;
+
+                  return (
+                    <View
+                      key={line.part_id}
+                      style={[
+                        styles.groupRow,
+                        { borderTopColor: theme.border },
+                        (change != null || isNew) && { backgroundColor: theme.badgeFill },
+                      ]}
+                    >
+                      <View style={styles.groupRowHead}>
+                        {isNew ? (
+                          <View style={[styles.newBadge, { backgroundColor: theme.accent }]}>
+                            <ThemedText type="small" style={{ color: theme.accentText }}>
+                              new
+                            </ThemedText>
+                          </View>
                         ) : null}
-                      </ThemedText>
-                      <MatchBadge value={line.p} />
+                        <ThemedText style={styles.grow} numberOfLines={2}>
+                          {line.name}
+                          {line.qty > 1 ? (
+                            <ThemedText type="smallBold" style={{ color: theme.textSecondary }}>
+                              {'  '}×{line.qty}
+                            </ThemedText>
+                          ) : null}
+                        </ThemedText>
+                        <MatchBadge value={line.p} />
+                      </View>
+
+                      {/* The move itself, in points, so it is legible from a metre away. */}
+                      {change != null ? (
+                        <View style={styles.deltaRow}>
+                          <Ionicons
+                            name={dropped ? 'arrow-down' : 'arrow-up'}
+                            size={13}
+                            color={dropped ? theme.textSecondary : theme.danger}
+                          />
+                          <ThemedText
+                            type="smallBold"
+                            style={{ color: dropped ? theme.textSecondary : theme.danger }}
+                          >
+                            {dropped ? '' : '+'}
+                            {Math.round((change.to - change.from) * 100)} points
+                          </ThemedText>
+                          <ThemedText type="small" themeColor="textSecondary">
+                            was {Math.round(change.from * 100)}%
+                          </ThemedText>
+                        </View>
+                      ) : null}
+
+                      {line.reason ? (
+                        <ThemedText type="small" themeColor="textSecondary">
+                          {line.reason}
+                        </ThemedText>
+                      ) : null}
+
+                      <CompactConfirm
+                        line={line}
+                        busy={busyId === line.part_id}
+                        onConfirm={onConfirm}
+                      />
                     </View>
-
-                    {line.reason ? (
-                      <ThemedText type="small" themeColor="textSecondary">
-                        {line.reason}
-                      </ThemedText>
-                    ) : null}
-
-                    <CompactConfirm
-                      line={line}
-                      busy={busyId === line.part_id}
-                      onConfirm={onConfirm}
-                    />
-                  </View>
-                ))
+                  );
+                })
               : null}
 
             {open && group.lines.length === 0 ? (
@@ -563,10 +612,19 @@ const styles = StyleSheet.create({
   pending: { padding: Spacing.three, gap: Spacing.three },
   // Tighter than the old crop-marked layout: cards carry their own edges, so they need
   // less air between them. Section headings buy the separation back with padding.
-  list: { padding: Spacing.three, gap: Spacing.three, paddingBottom: Spacing.five },
+  // Capped and centred. Without the cap the cards stretch the full width of a desktop
+  // browser, which is where this gets demoed — a 2000px-wide part row is unreadable.
+  list: {
+    padding: Spacing.three,
+    gap: Spacing.three,
+    paddingBottom: Spacing.five,
+    width: '100%',
+    maxWidth: 560,
+    alignSelf: 'center',
+  },
 
   // Masthead, as on the customer's page: name, then one quiet line under it.
-  masthead: { gap: 2 },
+  masthead: { gap: 2, alignItems: 'center' },
   mastheadSub: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one },
 
   // The job in one block, before any row of it.
@@ -650,6 +708,11 @@ const styles = StyleSheet.create({
   heroReason: { fontSize: 16, lineHeight: 24 },
   hardwareList: { paddingLeft: Spacing.four, gap: Spacing.half },
   deltaRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one },
+  newBadge: {
+    borderRadius: Radius.chip,
+    paddingHorizontal: Spacing.one + 2,
+    paddingVertical: 1,
+  },
   cascadeNote: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -686,8 +749,14 @@ const styles = StyleSheet.create({
   dot: { width: 9, height: 9, borderRadius: Radius.round },
 
   // The one summarising block on the screen, so it keeps the crop marks.
-  flagged: { gap: Spacing.two },
-  flaggedChips: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
+  flagged: { gap: Spacing.two, alignItems: 'center' },
+  centred: { textAlign: 'center' },
+  flaggedChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: Spacing.two,
+  },
   flaggedChip: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: Radius.chip,
