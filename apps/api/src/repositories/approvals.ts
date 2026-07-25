@@ -1,4 +1,4 @@
-import type { ApprovalLineItem, CustomerApproval } from '@first-look/shared';
+import type { ApprovalLineItem, CustomerApproval } from '@partli/shared';
 import type { Db } from '../db/index.js';
 
 interface ApprovalRow {

@@ -3,7 +3,7 @@
  *
  * Every function takes the `Db` explicitly so routes stay easy to test. SQL rows are
  * snake_case; everything returned from here is the camelCase domain type from
- * `@first-look/shared`.
+ * `@partli/shared`.
  */
 
 import type {
@@ -13,7 +13,7 @@ import type {
   Job,
   JobStatus,
   VehicleSlug,
-} from '@first-look/shared';
+} from '@partli/shared';
 import type { Db } from '../db/index.js';
 
 // --- row shapes -------------------------------------------------------------

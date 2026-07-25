@@ -3,7 +3,7 @@
 import { useActionState, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Check, Clock, ShieldCheck } from 'lucide-react';
-import { formatPrice, type ApprovalLineItem } from '@first-look/shared';
+import { formatPrice, type ApprovalLineItem } from '@partli/shared';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -155,7 +155,7 @@ export function ApprovalForm({ jobId, lineItems, approvedOption }: ApprovalFormP
                     <span className="truncate">{item.displayName}</span>
                     {item.kind === 'hidden' ? (
                       <Badge variant="success" className="shrink-0">
-                        Found by First Look
+                        Found by Partli
                       </Badge>
                     ) : null}
                   </div>

@@ -14,7 +14,7 @@ import { ApiError, api } from '@/lib/api';
 import { ApprovalForm } from './approval-form';
 
 export const metadata: Metadata = {
-  title: 'Approve your repair — First Look',
+  title: 'Approve your repair — Partli',
 };
 
 export default async function ApprovePage({
@@ -52,7 +52,7 @@ export default async function ApprovePage({
   return (
     <main className="mx-auto w-full max-w-lg px-4 py-8 sm:py-12">
       <header className="mb-6">
-        <p className="text-sm font-medium text-primary">First Look</p>
+        <p className="text-sm font-medium text-primary">Partli</p>
         <h1 className="mt-1 text-2xl font-semibold tracking-tight">
           Your repair options are ready
         </h1>

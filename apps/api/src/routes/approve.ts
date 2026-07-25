@@ -7,8 +7,8 @@
 
 import { Router } from 'express';
 import { z } from 'zod';
-import type { ApprovalPayload } from '@first-look/shared';
-import { loadVehicle } from '@first-look/shared/dataset';
+import type { ApprovalPayload } from '@partli/shared';
+import { loadVehicle } from '@partli/shared/dataset';
 
 import { getDb } from '../db/index.js';
 import { badRequest, notFound, parseBody } from '../http.js';

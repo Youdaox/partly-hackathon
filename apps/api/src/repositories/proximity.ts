@@ -4,10 +4,10 @@
  * The oracle does NOT read from this table — it builds the graph in memory, which
  * takes ~100ms for the Yaris and is cached per process. The table exists so the
  * graph can be inspected with SQL and so a future job runner can precompute it.
- * Populate it with `pnpm --filter @first-look/api seed`.
+ * Populate it with `pnpm --filter @partli/api seed`.
  */
 
-import type { ProximityEdge, VehicleSlug } from '@first-look/shared';
+import type { ProximityEdge, VehicleSlug } from '@partli/shared';
 import type { Db } from '../db/index.js';
 
 export async function replaceProximityEdges(
