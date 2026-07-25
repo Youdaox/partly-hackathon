@@ -11,7 +11,17 @@
  */
 
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { Platform, Pressable, ScrollView, Share, StyleSheet, View } from 'react-native';
+import {
+  Linking,
+  Platform,
+  Pressable,
+  ScrollView,
+  Share,
+  StyleSheet,
+  TextInput,
+  View,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import QRCode from 'react-native-qrcode-svg';
 import { formatPrice } from '@partli/shared';
@@ -19,7 +29,7 @@ import { formatPrice } from '@partli/shared';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Button, ErrorNotice, Loading } from '@/components/ui';
-import { Radius, Spacing } from '@/constants/theme';
+import { NoFocusRing, Radius, Spacing, TapTarget } from '@/constants/theme';
 import { toErrorInfo, useAsyncData } from '@/hooks/use-async-data';
 import { useTheme } from '@/hooks/use-theme';
 import { backend } from '@/lib/backend';
@@ -35,6 +45,7 @@ export default function SendToCustomerScreen() {
   const [resending, setResending] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showParts, setShowParts] = useState(false);
+  const [email, setEmail] = useState('');
   const [actionError, setActionError] = useState<{ title: string; detail?: string } | null>(null);
 
   const resend = useCallback(async () => {
@@ -98,6 +109,46 @@ export default function SendToCustomerScreen() {
       busy.current = false;
     }
   }, [quote.data]);
+
+  /**
+   * Email the link.
+   *
+   * This opens the phone's mail app with the message already written, rather than sending
+   * from the server: there is no SMTP config, no mail provider and no credentials anywhere in
+   * this build, so a "Sent" toast would be a lie. Handing off to the mail app genuinely
+   * delivers, and it comes from the shop's own address, which is what a customer should see.
+   */
+  const emailLink = useCallback(async () => {
+    const url = quote.data?.approval_url;
+    if (!url) return;
+
+    const to = email.trim();
+    if (!to || !to.includes('@')) {
+      setActionError({
+        title: 'That does not look like an email address',
+        detail: 'Enter the customer’s address, or use Copy link instead.',
+      });
+      return;
+    }
+
+    setActionError(null);
+    const subject = 'Your repair options are ready';
+    const body =
+      `Hi,\n\nYour repair options are ready to review and approve:\n\n${url}\n\n` +
+      `You can pick the plan that suits you — best price, our recommendation, or all ` +
+      `genuine parts.\n`;
+    const mailto = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(
+      subject,
+    )}&body=${encodeURIComponent(body)}`;
+
+    try {
+      const opened = await Linking.canOpenURL(mailto);
+      if (!opened) throw new Error('No mail app is set up on this device');
+      await Linking.openURL(mailto);
+    } catch (err) {
+      setActionError(toErrorInfo(err));
+    }
+  }, [quote.data, email]);
 
   /**
    * The price range the customer will actually be choosing between: cheapest offer per part
@@ -175,6 +226,49 @@ export default function SendToCustomerScreen() {
           fullWidth
         />
 
+        {/* Email it instead, for a customer who is not standing at the counter. */}
+        <View style={styles.emailRow}>
+          <TextInput
+            value={email}
+            onChangeText={setEmail}
+            placeholder="customer@email.com"
+            placeholderTextColor={theme.textSecondary}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="email-address"
+            inputMode="email"
+            onSubmitEditing={emailLink}
+            returnKeyType="send"
+            style={[
+              styles.emailInput,
+              { color: theme.text, borderColor: theme.border, backgroundColor: theme.backgroundElement },
+              NoFocusRing,
+            ]}
+          />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Email the link to the customer"
+            onPress={emailLink}
+            disabled={!email.trim()}
+            style={({ pressed }) => [
+              styles.emailSend,
+              {
+                backgroundColor: email.trim() ? theme.accent : theme.backgroundSelected,
+                opacity: pressed ? 0.8 : 1,
+              },
+            ]}
+          >
+            <Ionicons
+              name="mail-outline"
+              size={20}
+              color={email.trim() ? theme.accentText : theme.textSecondary}
+            />
+          </Pressable>
+        </View>
+        <ThemedText type="small" themeColor="textSecondary" style={styles.emailNote}>
+          Opens your mail app with the link written, so it comes from the shop&apos;s address.
+        </ThemedText>
+
         {/* One line instead of 66 rows. */}
         <View style={[styles.summary, { borderTopColor: theme.border, borderBottomColor: theme.border }]}>
           <View style={styles.summaryRow}>
@@ -218,13 +312,19 @@ export default function SendToCustomerScreen() {
 
         <View style={styles.actions}>
           <Button title="Back to the assessment" onPress={() => router.back()} fullWidth />
+          {/* Re-prices the quote against the current report and reissues the same link.
+              Named for what it does: the old "Rebuild quote" read like it might discard
+              something. */}
           <Button
-            title="Rebuild quote"
+            title="Update the quote"
             variant="secondary"
             onPress={resend}
             loading={resending}
             fullWidth
           />
+          <ThemedText type="small" themeColor="textSecondary" style={styles.footnote}>
+            Re-prices against any parts you have confirmed since. The link stays the same.
+          </ThemedText>
         </View>
 
         <ThemedText type="small" themeColor="textSecondary" style={styles.footnote}>
@@ -256,6 +356,24 @@ const styles = StyleSheet.create({
 
   linkWrap: { alignItems: 'center' },
   link: { textAlign: 'center' },
+
+  emailRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  emailInput: {
+    flex: 1,
+    fontSize: 16,
+    minHeight: TapTarget - 8,
+    paddingHorizontal: Spacing.three,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.round,
+  },
+  emailSend: {
+    width: TapTarget - 8,
+    height: TapTarget - 8,
+    borderRadius: Radius.round,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emailNote: { textAlign: 'center', marginTop: -Spacing.two },
 
   summary: {
     gap: Spacing.one,
