@@ -13,7 +13,6 @@ import { Fragment, useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { Framed } from '@/components/framed';
 import { ThemedText } from '@/components/themed-text';
 import {
   EmptyState,
@@ -239,17 +238,16 @@ function HiddenRow({
   const dropped = change != null && change.to < change.from;
 
   return (
-    // Each card carries its own crop marks, as in the mockup — the frame is a
-    // registration mark around one part, not a box around the whole list. Every
-    // card keeps both rules and is pulled up a hairline, so the boundary two
-    // cards share is drawn once rather than twice.
-    <Framed
+    // A rounded card, matching the plan cards on the customer's approval page. The
+    // crop-mark frame that used to be here drew its ticks hard against the screen
+    // edges, where they read as stray `+` glyphs rather than registration marks.
+    <View
       style={[
         styles.heroCard,
-        index > 0 && styles.heroCardStacked,
+        { borderColor: theme.border, backgroundColor: theme.backgroundElement },
         // A moved row says so for a few seconds, so the tap that moved it is
         // visibly what moved it.
-        change != null && { backgroundColor: theme.badgeFill },
+        change != null && { backgroundColor: theme.badgeFill, borderColor: theme.accent },
       ]}
     >
       {/* Numbered circle · bold name · % match, all on one line. The badge is
@@ -330,7 +328,7 @@ function HiddenRow({
           have parts behind them. The check section's terminal items do not,
           which is why the control looked broken when it was only down there. */}
       <ConfirmRow line={line} busy={busy} onConfirm={onConfirm} />
-    </Framed>
+    </View>
   );
 }
 
@@ -371,24 +369,34 @@ export function CaseReportView({
   const resolving = vehicle?.status === 'resolving';
 
   /**
-   * The pill reports Track A and must be visible *before* there is a report — watching the
-   * catalogue load is the point of it, so it cannot sit behind a spinner.
+   * The masthead, laid out like the customer's approval page: name, one quiet line of
+   * context, then a card that says what the job amounts to before any row of it.
+   *
+   * This replaced a full-width tinted status pill. The pill gave the loading state the
+   * loudest element on a screen it only occupies for two seconds, then kept shouting.
    */
+  const vehicleName = vehicle
+    ? [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(' ') || vehicle.rego
+    : null;
+
+  const subtitle = [
+    vehicle?.rego,
+    vehicle?.parts_indexed ? `${vehicle.parts_indexed.toLocaleString()} parts` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
   const statusPill = (
-    <View style={[styles.statusPill, { backgroundColor: theme.badgeFill }]}>
-      <Ionicons
-        name={resolving ? 'ellipsis-horizontal-circle-outline' : 'checkmark-circle'}
-        size={16}
-        color={theme.badgeText}
-      />
-      <ThemedText type="small" style={[styles.statusText, { color: theme.badgeText }]}>
-        {vehicleStatusLine(vehicle)}
-      </ThemedText>
-      {vehicle?.resolved_ms ? (
+    <View style={styles.masthead}>
+      {vehicleName ? <ThemedText type="section">{vehicleName}</ThemedText> : null}
+      <View style={styles.mastheadSub}>
+        {resolving ? (
+          <Ionicons name="ellipsis-horizontal" size={13} color={theme.textSecondary} />
+        ) : null}
         <ThemedText type="small" themeColor="textSecondary">
-          {vehicle.resolved_ms} ms
+          {vehicleName ? subtitle || vehicleStatusLine(vehicle) : vehicleStatusLine(vehicle)}
         </ThemedText>
-      ) : null}
+      </View>
     </View>
   );
 
@@ -460,11 +468,33 @@ export function CaseReportView({
       {statusPill}
 
       {/* Read first: the shape of the job before any row. */}
+      {/* What the job amounts to, before any row of it — the same summary block the
+          customer sees on their approval page, so the two read as one product. */}
       {impact ? (
-        <ThemedText type="rowTitle" style={styles.impact}>
-          {impact} · {report.sections.visible.length} visible ·{' '}
-          {report.sections.order.length} predicted hidden
-        </ThemedText>
+        <View
+          style={[
+            styles.summaryCard,
+            { borderColor: theme.border, backgroundColor: theme.backgroundElement },
+          ]}
+        >
+          <ThemedText type="rowTitle">
+            {report.sections.visible.length + report.sections.order.length} parts need replacing
+          </ThemedText>
+          <View style={styles.summaryBody}>
+            {report.sections.order.length > 0 ? (
+              <View style={[styles.summaryBadge, { backgroundColor: theme.badgeFill }]}>
+                <ThemedText type="smallBold" style={{ color: theme.badgeText }}>
+                  {report.sections.order.length} found early
+                </ThemedText>
+              </View>
+            ) : null}
+            <ThemedText type="small" themeColor="textSecondary" style={styles.summaryText}>
+              {impact}. {report.sections.order.length > 0
+                ? 'Parts predicted behind the panels are already in the list, so the order goes out once.'
+                : 'Nothing is predicted behind the panels yet.'}
+            </ThemedText>
+          </View>
+        </View>
       ) : null}
 
       {said ? (
@@ -489,7 +519,7 @@ export function CaseReportView({
 
       {/* --- The one clarifying question ------------------------------------- */}
       {report.question ? (
-        <Framed style={[styles.questionCard, { borderColor: theme.accent }]}>
+        <View style={[styles.questionCard, { borderColor: theme.accent, backgroundColor: theme.backgroundElement }]}>
           <SectionLabel>ONE QUESTION</SectionLabel>
           <ThemedText type="rowTitle">{report.question.text}</ThemedText>
           <View style={styles.chips}>
@@ -517,7 +547,7 @@ export function CaseReportView({
           <ThemedText type="small" themeColor="textSecondary">
             Asked because answering moves the report more than anything else.
           </ThemedText>
-        </Framed>
+        </View>
       ) : null}
 
       {/* --- Visible damage: facts, deliberately quiet --------------------- */}
@@ -695,6 +725,25 @@ const styles = StyleSheet.create({
   // less air between them. Section headings buy the separation back with padding.
   list: { padding: Spacing.three, gap: Spacing.three, paddingBottom: Spacing.five },
 
+  // Masthead, as on the customer's page: name, then one quiet line under it.
+  masthead: { gap: 2 },
+  mastheadSub: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one },
+
+  // The job in one block, before any row of it.
+  summaryCard: {
+    gap: Spacing.two,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.card,
+    padding: Spacing.three,
+  },
+  summaryBody: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.two },
+  summaryBadge: {
+    borderRadius: Radius.round,
+    paddingHorizontal: Spacing.two,
+    paddingVertical: Spacing.half,
+  },
+  summaryText: { flex: 1 },
+
   statusPill: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -737,11 +786,13 @@ const styles = StyleSheet.create({
   // Cards abut so adjacent crop marks sit on one shared rule, the way the
   // mockup stacks them.
   heroGroup: { gap: 0 },
+  // A rounded, bordered card, sized like the plan cards on the customer's page.
   heroCard: {
-    paddingVertical: Spacing.four,
+    padding: Spacing.three,
     gap: Spacing.two,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.card,
   },
-  heroCardStacked: { marginTop: -StyleSheet.hairlineWidth },
   heroHead: {
     flexDirection: 'row',
     alignItems: 'center',
