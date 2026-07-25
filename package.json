@@ -10,6 +10,7 @@
     "dev": "turbo run dev --filter=@partli/web",
     "dev:shared": "pnpm --filter @partli/shared dev",
     "api": "backend/.venv/bin/uvicorn app.main:app --port 8080 --app-dir backend",
+    "apiw": "node scripts/venv-run.mjs uvicorn app.main:app --port 8080 --app-dir backend --reload",
     "api:install": "python3 -m venv backend/.venv && backend/.venv/bin/pip install -e 'backend[dev]'",
     "api:test": "backend/.venv/bin/python -m pytest backend/tests -q",
     "api:warm": "cd backend && .venv/bin/python -m scripts.warm_cache",
