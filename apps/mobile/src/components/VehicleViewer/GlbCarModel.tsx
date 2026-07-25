@@ -1,92 +1,86 @@
 /**
- * Real GLB loader — not wired up by default (see PlaceholderCarModel for why).
+ * Real GLB car — assets/models/toyota_gr_corolla.glb, wired up in VehicleViewer.tsx.
  *
- * Once a real model exists at assets/models/generic-car.glb with meshes named
- * FrontBumper, LeftHeadlight, etc., switch VehicleViewer.tsx to render this instead:
+ * A detailed Sketchfab model (~170 meshes, CC-BY-4.0, see assets/models/README.md
+ * for attribution) but every mesh has a generic exporter-assigned name
+ * (`desirefx.me_042`, ...) — real geometry, nothing semantic to match a part name
+ * against. So exactly as with the previous placeholder model, the body renders as
+ * pure backdrop and PartOverlays (the same hand-placed regions the procedural
+ * fallback uses — see carLayout.ts) sits on top of it, positioned from the
+ * model's *real* bounding box so they line up with this specific car rather than
+ * a generic one.
  *
- *   <GlbCarModel source={require('../../../assets/models/generic-car.glb')} ... />
+ * Three corrections make that alignment work, all derived once from the GLB's
+ * own node/accessor data (see the long comment above MODEL_RECENTER in
+ * carLayout.ts):
+ *  - MODEL_SCALE — this file happens to already be in metres, so it's 1, kept
+ *    only so a future model swap that *does* need rescaling has somewhere to put it;
+ *  - MODEL_ROTATION_Y — the model's native length axis is X, not Z, so the whole
+ *    thing is rotated 90° to match this app's +Z-front convention;
+ *  - MODEL_RECENTER — the raw geometry isn't centred on the origin.
  *
- * Everything downstream (DamageOverlay, mock data, the mesh-name join key) is already
- * written against real mesh names, so nothing else needs to change.
+ * Selection works by picking the body mesh directly rather than raycasting a pile
+ * of invisible per-part boxes stacked on top of it: the ~170-mesh body is one
+ * real, unambiguous surface, so a tap always resolves to *something* concrete
+ * (`event.point`), and nearestExteriorMesh() finds which PART_LAYOUT entry that
+ * point is closest to. Doing it the other way — each part owning its own
+ * generously-sized invisible hit box — meant adjacent boxes overlapped, and
+ * raycasting returns whichever overlapping box is nearest the camera, not
+ * whichever one the user was actually looking at.
  */
 
 import { useMemo } from 'react';
-import * as THREE from 'three';
-// Metro resolves the "react-native" package.json field automatically on RN/Expo,
-// so this picks up drei's native build without a /native subpath import.
+import type * as THREE from 'three';
 import { useGLTF } from '@react-three/drei';
 import type { ThreeEvent } from '@react-three/fiber';
 
 import type { DamageRegion } from '@/types/damage';
-import { DamageOverlay } from './DamageOverlay';
+import { MODEL_RECENTER, MODEL_ROTATION_Y, MODEL_SCALE, nearestExteriorMesh } from './carLayout';
+import { PartOverlays } from './PartOverlays';
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports -- Metro asset require, not a module import
+const MODEL_SOURCE = require('../../../assets/models/toyota_gr_corolla.glb') as number;
 
 interface GlbCarModelProps {
-  /** Result of require('...glb') or a remote URI — whatever useGLTF accepts. */
-  source: string | number;
   activeRegions: DamageRegion[];
+  showInvisible: boolean;
   selectedMeshName: string | null;
   onSelectPart: (meshName: string) => void;
 }
 
-interface NamedMeshBounds {
-  name: string;
-  center: THREE.Vector3;
-  size: THREE.Vector3;
-}
-
 export function GlbCarModel({
-  source,
   activeRegions,
+  showInvisible,
   selectedMeshName,
   onSelectPart,
 }: GlbCarModelProps) {
   // drei's native typings lag the loader's actual return shape.
-  const gltf = useGLTF(source as never) as unknown as { scene: THREE.Object3D };
+  const gltf = useGLTF(MODEL_SOURCE as never) as unknown as { scene: THREE.Object3D };
+  const scene = useMemo(() => gltf.scene, [gltf]);
 
-  const meshes = useMemo(() => {
-    const found: NamedMeshBounds[] = [];
-    gltf.scene.traverse((child) => {
-      if (!(child as THREE.Mesh).isMesh || !child.name) return;
-      const box = new THREE.Box3().setFromObject(child);
-      found.push({ name: child.name, center: box.getCenter(new THREE.Vector3()), size: box.getSize(new THREE.Vector3()) });
-    });
-    return found;
-  }, [gltf]);
-
-  const handlePointerDown = (event: ThreeEvent<PointerEvent>) => {
+  const handleBodyPointerDown = (event: ThreeEvent<PointerEvent>) => {
     event.stopPropagation();
-    const name = event.object.name;
-    if (name) onSelectPart(name);
+    const meshName = nearestExteriorMesh([event.point.x, event.point.y, event.point.z]);
+    if (meshName) onSelectPart(meshName);
   };
 
   return (
     <group>
-      <primitive object={gltf.scene} onPointerDown={handlePointerDown} />
+      <group scale={MODEL_SCALE} position={MODEL_RECENTER} rotation={[0, MODEL_ROTATION_Y, 0]}>
+        <primitive object={scene} onPointerDown={handleBodyPointerDown} />
+      </group>
 
-      {meshes.map((mesh) => {
-        const region = activeRegions.find((r) => r.meshName === mesh.name) ?? null;
-        if (!region) return null;
-        return (
-          <DamageOverlay
-            key={mesh.name}
-            meshName={mesh.name}
-            size={[mesh.size.x || 0.2, mesh.size.y || 0.2, mesh.size.z || 0.2]}
-            position={[mesh.center.x, mesh.center.y, mesh.center.z]}
-            baseColor="#9AA0AC"
-            region={region}
-            selected={selectedMeshName === mesh.name}
-            onSelect={onSelectPart}
-            showBase={false}
-          />
-        );
-      })}
+      <PartOverlays
+        activeRegions={activeRegions}
+        showInvisible={showInvisible}
+        selectedMeshName={selectedMeshName}
+        onSelectPart={onSelectPart}
+        showBase={false}
+        drawWheelGeometry={false}
+        bodyPickMode
+      />
     </group>
   );
 }
 
-/** World position of a named mesh once the real model is loaded, for camera focus. */
-export function getGlbPartWorldPosition(scene: THREE.Object3D, meshName: string): THREE.Vector3 {
-  const found = scene.getObjectByName(meshName);
-  if (!found) return new THREE.Vector3(0, 0.4, 0);
-  return new THREE.Box3().setFromObject(found).getCenter(new THREE.Vector3());
-}
+useGLTF.preload(MODEL_SOURCE as never);
