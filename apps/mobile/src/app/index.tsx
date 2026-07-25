@@ -23,7 +23,6 @@ import {
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { matchVehicle, type VehicleSummary } from '@partli/shared';
 
 import { Framed } from '@/components/framed';
 import { RecentDrawer } from '@/components/recent-drawer';
@@ -34,7 +33,9 @@ import { NoFocusRing, Radius, Spacing, TapTarget } from '@/constants/theme';
 import { toErrorInfo, useAsyncData } from '@/hooks/use-async-data';
 import { useTheme } from '@/hooks/use-theme';
 import { useVoiceCapture } from '@/hooks/use-voice-capture';
-import { api } from '@/lib/api';
+import { backend } from '@/lib/backend';
+import { rememberCase } from '@/lib/recent-cases';
+import { resolveRego, type RegoMatch } from '@/lib/rego';
 
 /** Pre-filled starter, so the demo does not depend on remembering the phrasing. */
 const EXAMPLE = 'yaris front right hit, bumper hanging off';
@@ -45,46 +46,46 @@ export default function EntryScreen() {
   const voice = useVoiceCapture();
 
   // Loaded in the background — the input renders immediately either way.
-  const vehicles = useAsyncData(() => api.listVehicles());
+  const vehicles = useAsyncData(async () => (await backend.listVehicles()).vehicles);
 
   const [draft, setDraft] = useState('');
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<{ title: string; detail?: string } | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
 
-  const startable = (vehicles.data ?? []).filter((v) => v.hasCatalogue);
+  const startable = (vehicles.data ?? []).filter((v) => v.has_catalogue);
 
   const begin = useCallback(
-    async (vehicle: VehicleSummary, damageText: string) => {
+    async (match: RegoMatch) => {
       setStarting(true);
       setError(null);
 
-      const said = damageText.trim();
+      const said = match.remainder.trim();
 
       try {
-        // Seeding from the shipped AI prediction means the job opens already populated,
-        // and anything typed is layered on top (the same part twice is an upsert).
-        const job = await api.createJob(vehicle.slug, true);
+        // Track A: rego → VIN → catalogue, resolving in the background. Returns at once,
+        // so nothing here waits on it — the diagnosis screen shows its progress.
+        const vehicle = await backend.registerVehicle(match.rego);
+        const created = await backend.createCase(vehicle.vehicle_id);
 
-        let unmatched: string | undefined;
-        if (said) {
-          try {
-            await api.addDamage(job.id, said, 'voice');
-          } catch {
-            // No catalogue part matched the wording. Don't lose what they typed —
-            // hand it to the next screen so they can reword it in the follow-up box.
-            unmatched = said;
-          }
-        }
+        // Track B: the repairer's own words become the first evidence on the case. The
+        // backend recomputes the whole prediction from it.
+        if (said) await backend.sendMessage(created.case_id, said);
 
-        // Straight to the diagnosis. The oracle runs on arrival, so the first thing the
-        // repairer sees is ranked hidden damage rather than an empty capture form.
+        // The drawer's list lives on the device, since the backend cannot enumerate cases.
+        rememberCase({
+          caseId: created.case_id,
+          vehicleId: vehicle.vehicle_id,
+          label: `${match.vehicle.make} ${match.vehicle.model} · ${match.rego}`,
+          said: said || undefined,
+        });
+
         router.push({
-          pathname: '/job/[id]/hidden',
+          pathname: '/case/[id]',
           params: {
-            id: job.id,
+            id: created.case_id,
+            vehicleId: vehicle.vehicle_id,
             ...(said ? { said } : {}),
-            ...(unmatched ? { draft: unmatched } : {}),
           },
         });
         setDraft('');
@@ -106,22 +107,22 @@ export default function EntryScreen() {
       return;
     }
 
-    const match = matchVehicle(text, startable, { requireCatalogue: true });
+    const match = resolveRego(text, vehicles.data ?? []);
     if (!match) {
       // With no picker on screen, the error has to say what is actually available.
       setError({
         title: 'Which vehicle is that?',
         detail: startable.length
-          ? `Name it in your sentence. Available: ${startable
-              .map((v) => `${v.make} ${v.model}`)
+          ? `Name it or give the rego. Available: ${startable
+              .map((v) => `${v.make} ${v.model} (${v.rego})`)
               .join(', ')}.`
-          : 'No vehicles with a parts catalogue were found. Is the API running?',
+          : 'No vehicles with a parts catalogue were found. Is the backend running on 8080?',
       });
       return;
     }
 
-    void begin(match.vehicle, match.remainder);
-  }, [draft, starting, vehicles.loading, startable, begin]);
+    void begin(match);
+  }, [draft, starting, vehicles.loading, vehicles.data, startable, begin]);
 
   const toggleRecording = useCallback(async () => {
     if (voice.isRecording) {
@@ -137,8 +138,10 @@ export default function EntryScreen() {
     setError({
       title: startable.length ? 'Vehicles with a parts catalogue' : 'No catalogue vehicles found',
       detail: startable.length
-        ? `${startable.map((v) => `${v.make} ${v.model}`).join(', ')}. Name one in your sentence.`
-        : 'Is the API running?',
+        ? `${startable
+            .map((v) => `${v.make} ${v.model} (${v.rego})`)
+            .join(', ')}. Name one, or give its rego.`
+        : 'Is the backend running on port 8080?',
     });
   }, [startable]);
 

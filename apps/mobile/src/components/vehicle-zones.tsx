@@ -34,6 +34,71 @@ export interface ZoneMarker {
   zone: Zone;
 }
 
+/**
+ * Impact-zone variant, driven by the backend's `impact.zone`.
+ *
+ * Every part in the check section is in the impact zone by construction, so the markers
+ * fan out from that one point rather than each being placed independently.
+ */
+export function ImpactZones({
+  point,
+  count,
+  radius = 40,
+}: {
+  point: { x: number; y: number } | null;
+  /** How many numbered markers to fan out. */
+  count: number;
+  radius?: number;
+}) {
+  const theme = useTheme();
+
+  const cx = point ? toX(point.x) : 0;
+  const cy = point ? toY(point.y) : 0;
+  const shown = Math.min(count, 5);
+
+  return (
+    <View style={styles.container}>
+      <Svg viewBox={`0 0 ${VIEW_W} ${VIEW_H}`} style={styles.svg}>
+        <Path d={BODY} fill="none" stroke={theme.textSecondary} strokeWidth={2} strokeLinejoin="round" />
+        <Path d={BELT} fill="none" stroke={theme.textSecondary} strokeWidth={1.5} />
+        <Circle cx={120} cy={132} r={27} fill="none" stroke={theme.textSecondary} strokeWidth={2} />
+        <Circle cx={292} cy={132} r={27} fill="none" stroke={theme.textSecondary} strokeWidth={2} />
+
+        {point ? (
+          <>
+            <Circle cx={cx} cy={cy} r={radius} fill={theme.accent} opacity={0.16} />
+            {Array.from({ length: shown }, (_, i) => {
+              // Fan across the highlight so the badges do not sit on top of each other.
+              const spread = (i - (shown - 1) / 2) * 26;
+              return (
+                <G key={`impact-${i}`}>
+                  <Circle cx={cx + spread * 0.55} cy={cy + spread * 0.5} r={11.5} fill={theme.badgeText} />
+                  <SvgText
+                    x={cx + spread * 0.55}
+                    y={cy + spread * 0.5 + 4.5}
+                    fill={theme.accentText}
+                    fontSize={13}
+                    fontWeight="bold"
+                    textAnchor="middle"
+                  >
+                    {i + 1}
+                  </SvgText>
+                </G>
+              );
+            })}
+          </>
+        ) : null}
+      </Svg>
+
+      {point ? null : (
+        <ThemedText type="small" themeColor="textSecondary" style={styles.empty}>
+          No impact zone determined yet.
+        </ThemedText>
+      )}
+    </View>
+  );
+}
+
 export function VehicleZones({ markers }: { markers: ZoneMarker[] }) {
   const theme = useTheme();
 

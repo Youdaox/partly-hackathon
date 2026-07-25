@@ -13,6 +13,38 @@
  * which is honest; a guessed marker on the wrong corner of the car is not.
  */
 
+/**
+ * The impact zone the prediction backend reports on a case (`impact.zone`), mapped onto
+ * the silhouette. This is real data from the vision/interpreter pass, so it is what the
+ * diagnosis screen highlights — the name-matching below is only a per-part fallback for
+ * the legacy jobs screen.
+ */
+export type ImpactZone = 'front' | 'rear' | 'side' | 'other';
+
+const IMPACT_POINTS: Record<ImpactZone, { x: number; y: number }> = {
+  front: { x: 0.15, y: 0.62 },
+  rear: { x: 0.88, y: 0.62 },
+  side: { x: 0.5, y: 0.6 },
+  other: { x: 0.5, y: 0.4 },
+};
+
+/** Where to centre the highlight for a backend impact zone. Null if it reports none. */
+export function impactZonePoint(zone: string | null | undefined): { x: number; y: number } | null {
+  if (!zone) return null;
+  const key = zone.toLowerCase();
+  return key in IMPACT_POINTS ? IMPACT_POINTS[key as ImpactZone] : IMPACT_POINTS.other;
+}
+
+/** `R` / `L` / anything else the backend sends, in the repairer's words. */
+export function sideLabel(side: string | null | undefined): string | null {
+  if (!side) return null;
+  const key = side.toUpperCase();
+  if (key === 'R') return 'right';
+  if (key === 'L') return 'left';
+  if (key === 'B' || key === 'BOTH') return 'both sides';
+  return side;
+}
+
 export type ZoneId =
   | 'front-lower'
   | 'front-upper'
