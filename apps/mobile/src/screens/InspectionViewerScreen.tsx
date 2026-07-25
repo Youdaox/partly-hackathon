@@ -1,9 +1,11 @@
 /**
  * AI Damage Inspection Viewer — screen 4.
  *
- * Visualises detected damage on an interactive 3D vehicle: toggle visible vs.
- * AI-inferred hidden damage, tap a highlighted part to see what the AI thinks and
- * why, and drill into an exploded OEM diagram for ordering context.
+ * A repairer's tool for locating and identifying parts on a vehicle first, and
+ * seeing AI damage predictions second: every part on the car is tappable, whether
+ * or not anything is wrong with it. Toggling "Invisible Damage" doubles as an
+ * X-ray mode that reveals parts not visible from outside (engine, structural
+ * members) so they can be located too, not just flagged as damaged.
  *
  * Runs entirely on mock data (see data/mockDamageData.ts) — there is no detection
  * pipeline or backend call here yet. The `id` route param is accepted so this slots
@@ -22,6 +24,7 @@ import { DamageLegend } from '@/components/Damage/DamageLegend';
 import { DamageToggle } from '@/components/Damage/DamageToggle';
 import { ExplodedDiagram } from '@/components/Diagram/ExplodedDiagram';
 import { PartBottomSheet } from '@/components/Parts/PartBottomSheet';
+import { labelForMesh } from '@/components/VehicleViewer/carLayout';
 import { VehicleViewer } from '@/components/VehicleViewer/VehicleViewer';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -51,12 +54,14 @@ export default function InspectionViewerScreen() {
     [showVisible, showInvisible],
   );
 
-  const selectedRegion = activeRegions.find((r) => r.meshName === selectedMeshName) ?? null;
+  const selectedRegion = selectedMeshName
+    ? (activeRegions.find((r) => r.meshName === selectedMeshName) ?? null)
+    : null;
+  const selectedLabel = selectedMeshName ? labelForMesh(selectedMeshName) : '';
 
-  const selectPart = (meshName: string) => {
-    const match = activeRegions.find((r) => r.meshName === meshName);
-    if (match) setSelectedMeshName(meshName);
-  };
+  // Every part is tappable, not just damaged ones — this is a locate-a-part tool
+  // first. The sheet decides for itself whether there's damage detail to show.
+  const selectPart = (meshName: string) => setSelectedMeshName(meshName);
 
   const closeSheet = () => setSelectedMeshName(null);
 
@@ -83,6 +88,7 @@ export default function InspectionViewerScreen() {
       <View style={styles.viewerArea}>
         <VehicleViewer
           activeRegions={activeRegions}
+          showInvisible={showInvisible}
           selectedMeshName={selectedMeshName}
           onSelectPart={selectPart}
         />
@@ -143,8 +149,10 @@ export default function InspectionViewerScreen() {
       </Modal>
 
       <PartBottomSheet
+        meshName={selectedMeshName}
+        label={selectedLabel}
         region={selectedRegion}
-        visible={selectedRegion !== null}
+        visible={selectedMeshName !== null}
         onClose={closeSheet}
         onViewDiagram={() => setDiagramVisible(true)}
       />

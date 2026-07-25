@@ -1,5 +1,11 @@
 /**
- * Bottom sheet shown when a repairer taps a highlighted part on the 3D viewer.
+ * Bottom sheet shown when a repairer taps any part on the 3D viewer.
+ *
+ * This is a locate-a-part tool first, a damage viewer second: tapping an
+ * undamaged part (most of them, most of the time) still opens the sheet, just
+ * with a short "no damage reported" version instead of the full AI writeup —
+ * naming and finding a part is the baseline, damage detail is what's layered on
+ * top when there's something to say.
  *
  * Deliberately a hand-rolled Modal + Reanimated slide rather than a bottom-sheet
  * library — this app has no such dependency yet and the interaction here (open,
@@ -19,13 +25,25 @@ import type { DamageRegion } from '@/types/damage';
 const SHEET_HEIGHT = Math.min(Dimensions.get('window').height * 0.6, 520);
 
 interface PartBottomSheetProps {
+  /** The part that was tapped — null when nothing is selected (sheet stays hidden). */
+  meshName: string | null;
+  /** Display label for `meshName`, shown whether or not there's a DamageRegion. */
+  label: string;
+  /** Present only when the AI has something to say about this part. */
   region: DamageRegion | null;
   visible: boolean;
   onClose: () => void;
   onViewDiagram: () => void;
 }
 
-export function PartBottomSheet({ region, visible, onClose, onViewDiagram }: PartBottomSheetProps) {
+export function PartBottomSheet({
+  meshName,
+  label,
+  region,
+  visible,
+  onClose,
+  onViewDiagram,
+}: PartBottomSheetProps) {
   const theme = useTheme();
   const translateY = useSharedValue(SHEET_HEIGHT);
 
@@ -37,7 +55,7 @@ export function PartBottomSheet({ region, visible, onClose, onViewDiagram }: Par
     transform: [{ translateY: translateY.value }],
   }));
 
-  if (!region) return null;
+  if (!meshName) return null;
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -53,47 +71,49 @@ export function PartBottomSheet({ region, visible, onClose, onViewDiagram }: Par
 
         <View style={styles.headerRow}>
           <ThemedText type="subtitle" style={styles.headerTitle}>
-            {region.partName}
+            {label}
           </ThemedText>
-          <Pill
-            label={region.damageType === 'visible' ? 'Visible' : 'AI-predicted'}
-            tone={region.damageType === 'visible' ? 'accent' : 'neutral'}
-          />
+          {region ? (
+            <Pill
+              label={region.damageType === 'visible' ? 'Visible' : 'AI-predicted'}
+              tone={region.damageType === 'visible' ? 'accent' : 'neutral'}
+            />
+          ) : null}
         </View>
 
-        <Section label="Damage">
-          <ThemedText type="default">{region.description}</ThemedText>
-        </Section>
+        {region ? (
+          <>
+            <Section label="Damage">
+              <ThemedText type="default">{region.description}</ThemedText>
+            </Section>
 
-        {/* Only predictions carry a likelihood. A visible part was detected in
-            the photos, so it is reported as detected, not as a probability. */}
-        {region.damageType === 'invisible' ? (
-          <Section label="Likelihood">
-            <ConfidenceBar value={region.confidence} />
-          </Section>
-        ) : (
-          <Section label="Status">
-            <ThemedText type="default">Detected in the photos by Partly</ThemedText>
-          </Section>
-        )}
+            <Section label="Confidence">
+              <ConfidenceBar value={region.confidence} />
+            </Section>
 
-        <Section label="AI Insight">
-          <View style={[styles.insightCard, { backgroundColor: theme.backgroundElement }]}>
-            <ThemedText type="small">{region.explanation}</ThemedText>
-          </View>
-        </Section>
-
-        <Section label="Related parts">
-          <View style={styles.chipsRow}>
-            {region.parts.map((part) => (
-              <View key={part} style={[styles.partChip, { backgroundColor: theme.backgroundSelected }]}>
-                <ThemedText type="small">{part}</ThemedText>
+            <Section label="AI Insight">
+              <View style={[styles.insightCard, { backgroundColor: theme.backgroundElement }]}>
+                <ThemedText type="small">{region.explanation}</ThemedText>
               </View>
-            ))}
-          </View>
-        </Section>
+            </Section>
 
-        <Button title="View exploded diagram" onPress={onViewDiagram} variant="secondary" fullWidth />
+            <Section label="Related parts">
+              <View style={styles.chipsRow}>
+                {region.parts.map((part) => (
+                  <View key={part} style={[styles.partChip, { backgroundColor: theme.backgroundSelected }]}>
+                    <ThemedText type="small">{part}</ThemedText>
+                  </View>
+                ))}
+              </View>
+            </Section>
+
+            <Button title="View exploded diagram" onPress={onViewDiagram} variant="secondary" fullWidth />
+          </>
+        ) : (
+          <ThemedText type="small" themeColor="textSecondary">
+            No damage reported for this part.
+          </ThemedText>
+        )}
       </Animated.View>
     </Modal>
   );
