@@ -20,8 +20,22 @@ KLASS_RULES: list[tuple[str, str]] = [
     (r"headlamp bracket|head lamp bracket|lamp bracket", "lamp_bracket"),
     (r"bumper (side )?stay|bumper arm|bumper extension", "crash_box"),
     (r"bumper (side )?bracket", "bracket"),
+    # A lamp's wire is not the lamp: "Right Headlight Wiring Harness" must not
+    # fall into `headlamp` just because "headlight" is a substring. Must
+    # precede the lighting block below. Scoped to wire/wiring so it doesn't
+    # pre-empt the retainer/clip rules above it for names like "...Harness Clip".
+    (r"wire harness|wiring harness", "harness"),
     # --- bumper system ------------------------------------------------------
     (r"impact absorber|energy absorber|bumper absorber", "bumper_absorber"),
+    # A reinforcement "brace" is the bracket sub-assembly that carries the beam's
+    # load into the side member — structurally the crash box, not the beam
+    # itself (std_note on this catalogue's part: "BRACKET SUB-ASSY, FRONT SIDE
+    # MEMBER"). Must precede the plain "bumper reinforcement" rule below, which
+    # "Front Bumper Reinforcement Brace" would otherwise match first. Scoped to
+    # the bumper: an unrelated "Quarter Panel Reinforcement Brace" exists in
+    # this catalogue with no evidence it plays the same role. Excludes
+    # "...Brace Protector", a separate cover part this rule has no evidence for.
+    (r"bumper reinforcement brace(?!\s*protector)", "crash_box"),
     (r"bumper reinforcement|reinforcement bar|bumper beam", "reinforcement_beam"),
     (r"crash box|bumper crush|extension sub-assembly", "crash_box"),
     (r"splash shield|bumper shield", "splash_shield"),
@@ -101,8 +115,14 @@ ZONE_RULES: list[tuple[str, str]] = [
         r"|glove|armrest|headlining|\bpillar\b|\bcabin\b",
         "other",
     ),
-    (r"\bfront\b|\bbonnet\b|\bhood\b|radiator|headlamp|head lamp|fog lamp", "front"),
-    (r"\brear\b|\bboot\b|\btrunk\b|tailgate|tail lamp|tail light", "rear"),
+    # "Headlight" and "headlamp" are used interchangeably in this catalogue —
+    # 43 Yaris parts (relays, sensors, the wiring harness) say "headlight" and
+    # none of them matched here before this line included it. A part with
+    # zone="other" gets zone_factor 0 and candidate_set drops it unconditionally
+    # (physics.py), so this was not a scoring error — those parts could never
+    # appear in a report at all, at any severity.
+    (r"\bfront\b|\bbonnet\b|\bhood\b|radiator|head\s?lamp|head\s?light|fog\s?lamp|fog\s?light", "front"),
+    (r"\brear\b|\bboot\b|\btrunk\b|tailgate|tail\s?lamp|tail\s?light", "rear"),
 ]
 
 # Klasses that sit on the vehicle centre-line, so a left/right impact reaches

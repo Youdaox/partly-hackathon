@@ -42,6 +42,37 @@ class Sections:
     hidden_count: int = 0
 
 
+def _dedupe(predictions: list[Prediction], parts: dict[str, Part]) -> tuple[list[Prediction], int]:
+    """Collapse rows that name the same physical component, keeping the
+    strongest probability.
+
+    The catalogue lists a part once per fitted position, so a front corner can
+    carry "Right Front Guard Grommet" under six different part ids. Before this
+    ran, six duplicate rows at p=1.0 could fill every CAP_ORDER slot ahead of a
+    real, distinct part sitting at p=0.98 right behind them — found by checking
+    a real Yaris report rather than trusting the unit tests in isolation.
+    Dedup must happen *before* the cap, which is why it lives here rather than
+    only in report_service (which used to run it after the cut had already
+    happened).
+    """
+    best: dict[tuple[str, str | None], Prediction] = {}
+    order: list[tuple[str, str | None]] = []
+    dropped = 0
+    for prediction in predictions:
+        part = parts.get(prediction.part_id)
+        if part is None:
+            continue
+        key = (part.name, part.part_number)
+        if key not in best:
+            best[key] = prediction
+            order.append(key)
+        else:
+            dropped += 1
+            if prediction.p > best[key].p:
+                best[key] = prediction
+    return [best[key] for key in order], dropped
+
+
 def split(
     predictions: dict[str, Prediction],
     parts: dict[str, Part],
@@ -78,6 +109,13 @@ def split(
             check_pool.append(prediction)
         else:
             hidden += 1
+
+    # Dedupe before sorting and before the caps below — a cap that sees
+    # duplicate rows first gives its slots to the same component six times.
+    visible, dropped_visible = _dedupe(visible, parts)
+    order, dropped_order = _dedupe(order, parts)
+    check_pool, dropped_check = _dedupe(check_pool, parts)
+    hidden += dropped_visible + dropped_order + dropped_check
 
     # Observed parts keep the Interpreter's own ordering (insertion order of
     # the predictions dict follows the sweep, so sort by p as the stable proxy

@@ -11,6 +11,7 @@ import pytest
 from app.catalogue import edges as edge_builder
 from app.catalogue import interpreter, registry
 from app.catalogue.tagger import classify, side_of, tag, zone_of
+from app.tables.depth_map import DEPTH_MAP
 
 SLUG = "toyota-yaris-qmn16"
 
@@ -54,6 +55,37 @@ def test_klass_rules_are_ordered_correctly(name, expected):
     assert classify(name) == expected
 
 
+def test_gate_five_named_parts_classify_exactly():
+    """The §12.1 gate: five real Yaris part numbers (found via hotspot.code,
+    verified present in the shipped catalogue), each with an exact expected
+    klass and depth. If this fails, every downstream number "looks plausible
+    and is wrong" — the spec's own words for why this runs before anything else.
+
+    Two of these caught real ordering bugs when first checked against the real
+    catalogue rather than a hand-picked fixture:
+      - "Right Headlight Wiring Harness" matched `headlamp` before `harness`,
+        because the lighting rules ran before the wire/wiring-harness rule.
+        A lamp's wire is not the lamp.
+      - "Front Bumper Reinforcement Brace" matched the generic reinforcement
+        rule instead of `crash_box`, despite its own std_note reading "BRACKET
+        SUB-ASSY, FRONT SIDE MEMBER" — it is the load-transfer bracket between
+        the beam and the rail, not the beam itself.
+    """
+    gate = [
+        ("Front Bumper Cover Retainer - Right Upper", "52535", "cover_retainer", 1),
+        ("Front Bumper Impact Absorber", "52611", "bumper_absorber", 2),
+        ("Radiator Support Headlamp Bracket - Right", "52143K", "lamp_bracket", 3),
+        ("Right Headlight Wiring Harness", "81125", "harness", 3),
+        ("Front Bumper Reinforcement Brace - Right", "57013D", "crash_box", 4),
+    ]
+    for name, part_number, expected_klass, expected_depth in gate:
+        got_klass = classify(name)
+        assert got_klass == expected_klass, f"{name!r} (part {part_number}): got {got_klass}"
+        assert DEPTH_MAP[got_klass] == expected_depth, (
+            f"{name!r} (part {part_number}): depth {DEPTH_MAP[got_klass]} != {expected_depth}"
+        )
+
+
 @pytest.mark.parametrize(
     "name,expected",
     [
@@ -76,6 +108,14 @@ def test_side_detection_handles_prefix_and_suffix(name, expected):
         # "Front door" is not the front of the car.
         ("Right Front Door Trim Moulding - Interior", "other"),
         ("Left Front Door Air Bag Impact Sensor", "other"),
+        # "Headlight" and "headlamp" are used interchangeably in this
+        # catalogue — 43 Yaris parts say "headlight" and none matched the zone
+        # rule before it included that spelling. A part zoned "other" gets
+        # zone_factor 0 (physics.py) and is silently dropped from every
+        # candidate set, at any severity — not a scoring error, an erasure.
+        ("Right Headlight Wiring Harness", "front"),
+        ("Automatic Headlight Sensor Wiring Harness", "front"),
+        ("Fog Light Cut-Off Relay", "front"),
     ],
 )
 def test_zone_detection(name, expected):

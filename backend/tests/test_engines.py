@@ -305,6 +305,39 @@ def test_caps_are_hard(chain):
     assert len(sections.visible) <= CAP_VISIBLE
 
 
+def test_dedupe_runs_before_the_cap_not_after():
+    """Found on a real Yaris report: the catalogue lists one physical part
+    once per fitted position, so a corner can carry the same part name under
+    six different part ids. Six duplicate rows at p=1.0 filled every
+    CAP_ORDER slot ahead of a distinct, lower-scoring real part sitting right
+    behind them. Dedup must happen inside buckets.split, before truncation —
+    a dedup that only ran downstream (as report_service's used to) is too
+    late to save the slot.
+    """
+    duplicate_part_id = "shared_number"
+    parts = {}
+    predictions = {}
+    # Six rows, same name and part_number, all p=1.0 — the duplicate spam.
+    for i in range(6):
+        pid = f"dup{i}"
+        parts[pid] = Part(
+            part_id=pid, name="Right Front Guard Grommet", klass="clip", depth=2,
+            zone="front", side="R", part_number=duplicate_part_id,
+        )
+        predictions[pid] = graph.Prediction(part_id=pid, p=1.0, reason="")
+    # One genuinely distinct part, scored lower, that a duplicate-blind cap
+    # of 8 would never have room for if the six duplicates all counted.
+    distinct = Part(part_id="real", name="Headlight Wiring Harness", klass="harness",
+                    depth=3, zone="front", side="R", part_number="different")
+    parts["real"] = distinct
+    predictions["real"] = graph.Prediction(part_id="real", p=0.97, reason="")
+
+    sections = buckets.split(predictions, parts)
+    order_ids = {p.part_id for p in sections.order}
+    assert "real" in order_ids, "a distinct part must not be crowded out by duplicate rows"
+    assert len(sections.order) == 2, "six duplicate rows must collapse to one"
+
+
 def test_rejected_parts_leave_the_report(chain):
     parts, edges = chain
     evidence = Evidence("front", "R", 3, {"cover": 0.98}, confirmations={"retainer": False})
