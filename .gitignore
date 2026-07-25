@@ -33,3 +33,11 @@ yarn-error.log*
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# Python backend
+backend/.venv/
+backend/.storage/
+backend/.cache/
+__pycache__/
+*.pyc
+.pytest_cache/
