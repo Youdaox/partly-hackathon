@@ -1,5 +1,29 @@
 services:
-  api:
+  postgres:
+    image: postgres:16-alpine
+    container_name: first-look-db
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: firstlook
+      POSTGRES_PASSWORD: firstlook
+      POSTGRES_DB: firstlook
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U firstlook -d firstlook"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Partly's read-only dataset API from the hackathon bundle (docs at :8420/docs).
+  # The `api/` image source was NOT included in this repo, so this service is behind
+  # a profile and will not start with a plain `docker compose up`. Drop the folder in
+  # and run `docker compose --profile dataset up` if you want it. Nothing in First Look
+  # depends on it — apps/api reads `data/` straight off disk via packages/shared.
+  dataset-api:
+    profiles: ["dataset"]
     build: ./api
     ports:
       - "8420:8420"
@@ -7,3 +31,6 @@ services:
       - ./data:/data:ro
     environment:
       DATA_DIR: /data
+
+volumes:
+  postgres-data:
