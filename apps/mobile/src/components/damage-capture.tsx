@@ -34,6 +34,7 @@ import * as ImagePicker from 'expo-image-picker';
 
 import { Composer } from '@/components/composer';
 import { ThemedText } from '@/components/themed-text';
+import { PropagationGraph } from '@/components/PropagationGraph';
 import { SuggestionRow } from '@/components/ui';
 import { Radius, Spacing } from '@/constants/theme';
 import { toErrorInfo } from '@/hooks/use-async-data';
@@ -41,14 +42,10 @@ import type { ErrorInfo, MediaFile } from '@/hooks/use-case';
 import { useTheme } from '@/hooks/use-theme';
 import type { VehiclePayload } from '@/lib/backend';
 
-const BEATS = [
-  'Storing what you added against the case',
-  'Partly interpreter: reading the photos',
-  'Visible damage identified',
-  'Our engine: propagating through the parts graph',
-];
-
 const BEAT_MS = 700;
+
+/** The backend caps one upload request at 10 files (`media_service`). */
+const MAX_ATTACHMENTS = 10;
 
 interface Attachment {
   kind: 'image' | 'video';
@@ -105,10 +102,29 @@ export function DamageCapture({
   // so the effect does not re-fire on every keystroke.
   const pendingSend = useRef<null | (() => void)>(null);
 
-  const add = useCallback((picked: ImagePicker.ImagePickerAsset[]) => {
-    setAttachments((current) => [
-      ...current,
-      ...picked.map((asset, i) => {
+  const count = attachments.length;
+
+  const add = useCallback(
+    (picked: ImagePicker.ImagePickerAsset[]) => {
+      // Checked here rather than inside the state updater: an updater must be
+      // pure, and React may run it twice — which would fire the message twice.
+      // Said here rather than letting the upload come back 413.
+      const room = MAX_ATTACHMENTS - count;
+      if (room <= 0) {
+        setError({
+          title: `That's ${MAX_ATTACHMENTS} files`,
+          detail: 'Send these first, then add more to the same case.',
+        });
+        return;
+      }
+      if (picked.length > room) {
+        setError({
+          title: `Added the first ${room}`,
+          detail: `A case takes ${MAX_ATTACHMENTS} files at a time.`,
+        });
+      }
+
+      const next = picked.slice(0, room).map((asset, i) => {
         const kind: 'image' | 'video' = asset.type === 'video' ? 'video' : 'image';
         return {
           kind,
@@ -117,13 +133,15 @@ export function DamageCapture({
             uri: asset.uri,
             name:
               asset.fileName ??
-              `${kind}-${current.length + i + 1}.${kind === 'video' ? 'mp4' : 'jpg'}`,
+              `${kind}-${count + i + 1}.${kind === 'video' ? 'mp4' : 'jpg'}`,
             type: asset.mimeType ?? (kind === 'video' ? 'video/mp4' : 'image/jpeg'),
           },
         };
-      }),
-    ]);
-  }, []);
+      });
+      setAttachments((current) => [...current, ...next]);
+    },
+    [count],
+  );
 
   const pickFromLibrary = useCallback(
     async (mediaTypes: 'images' | 'videos') => {
@@ -138,9 +156,12 @@ export function DamageCapture({
       }
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: [mediaTypes],
-        allowsMultipleSelection: mediaTypes === 'images',
-        // The backend caps a request at 10 files.
-        selectionLimit: 10,
+        // Always multi. A crash is several photos — one per corner, one of the
+        // plate — and making the repairer reopen the picker for each is the
+        // slowest part of the job. `allowsEditing` is deliberately unset: it is
+        // mutually exclusive with multi-select and silently forces single.
+        allowsMultipleSelection: true,
+        selectionLimit: MAX_ATTACHMENTS,
         videoMaxDuration: 120,
       });
       if (!result.canceled) add(result.assets);
@@ -298,6 +319,26 @@ export function DamageCapture({
           )}
         </View>
       ))}
+
+      {/* Adding a second batch without reopening the menu. Photos come off a
+          phone in handfuls and the count is easy to get wrong first time. */}
+      {!dimmed && attachments.length < MAX_ATTACHMENTS ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Add more photos"
+          onPress={() => void pickFromLibrary('images')}
+          style={({ pressed }) => [
+            styles.thumbWrap,
+            styles.addMore,
+            { borderColor: theme.border, opacity: pressed ? 0.6 : 1 },
+          ]}
+        >
+          <Ionicons name="add" size={22} color={theme.iconMuted} />
+          <ThemedText type="small" themeColor="textSecondary">
+            {attachments.length}/{MAX_ATTACHMENTS}
+          </ThemedText>
+        </Pressable>
+      ) : null}
     </View>
   );
 
@@ -313,36 +354,17 @@ export function DamageCapture({
 
           {attachments.length > 0 ? thumbnails(true) : null}
 
-          {/* Sent early. The photos are held and the run starts by itself the
-              instant the catalogue lands — nothing to press again. */}
-          {queued ? (
-            <View style={styles.beatRow}>
-              <ActivityIndicator size="small" color={theme.accent} />
-              <ThemedText type="smallBold">Analysing — waiting for the catalogue…</ThemedText>
-            </View>
-          ) : null}
-
-          {queued ? null : (
-            <View style={styles.beats}>
-              {BEATS.map((label, index) => (
-                <View key={label} style={styles.beatRow}>
-                  {index < beat ? (
-                    <Ionicons name="checkmark-circle" size={18} color={theme.success} />
-                  ) : index === beat ? (
-                    <ActivityIndicator size="small" color={theme.accent} />
-                  ) : (
-                    <Ionicons name="ellipse-outline" size={18} color={theme.border} />
-                  )}
-                  <ThemedText
-                    type={index === beat ? 'smallBold' : 'small'}
-                    themeColor={index <= beat ? 'text' : 'textSecondary'}
-                  >
-                    {label}
-                  </ThemedText>
-                </View>
-              ))}
-            </View>
-          )}
+          {/* One picture of what the engine is doing, in place of a list of
+              labels describing it. Loops in both states — a queued send is
+              still an analysis, it is just waiting on the catalogue first. */}
+          <View style={styles.graph}>
+            <PropagationGraph />
+            <ThemedText type="small" themeColor="textSecondary" style={styles.graphCaption}>
+              {queued
+                ? 'Waiting for the catalogue, then propagating…'
+                : 'Propagating through the parts graph…'}
+            </ThemedText>
+          </View>
         </View>
       </ScrollView>
     );
@@ -391,7 +413,7 @@ export function DamageCapture({
         <View style={styles.suggestions}>
           <SuggestionRow
             icon="images-outline"
-            label="Add crash photos"
+            label="Add crash photos — pick several at once"
             onPress={() => void pickFromLibrary('images')}
           />
           <SuggestionRow
@@ -418,7 +440,7 @@ export function DamageCapture({
           <View style={[styles.sheet, { backgroundColor: theme.background }]}>
             <SuggestionRow
               icon="images-outline"
-              label="Photo library"
+              label="Photo library — select multiple"
               onPress={() => void pickFromLibrary('images')}
             />
             <SuggestionRow
@@ -471,6 +493,13 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   thumb: { width: '100%', height: '100%' },
+  addMore: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 1,
+    borderStyle: 'dashed',
+    borderWidth: 1,
+  },
   thumbScrim: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, opacity: 0.18 },
   thumbRemove: {
     position: 'absolute',
@@ -491,8 +520,8 @@ const styles = StyleSheet.create({
     padding: 3,
   },
 
-  beats: { gap: Spacing.three, paddingVertical: Spacing.three },
-  beatRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  graph: { alignItems: 'center', gap: Spacing.two, paddingVertical: Spacing.four },
+  graphCaption: { textAlign: 'center' },
 
   error: { marginTop: Spacing.three, alignItems: 'center', gap: Spacing.half },
   errorDetail: { textAlign: 'center' },
