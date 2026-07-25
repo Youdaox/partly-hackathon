@@ -17,14 +17,14 @@ import { Button, Card, ErrorNotice, Loading, Pill } from '@/components/ui';
 import { Spacing } from '@/constants/theme';
 import { toErrorInfo, useAsyncData } from '@/hooks/use-async-data';
 import { useTheme } from '@/hooks/use-theme';
-import { api } from '@/lib/api';
+import { backend } from '@/lib/backend';
 
 export default function SendToCustomerScreen() {
   const { id: caseId } = useLocalSearchParams<{ id: string }>();
   const theme = useTheme();
 
   // Sending on mount is the point of this screen — there is nothing to configure.
-  const quote = useAsyncData(() => api.sendToCustomer(caseId), [caseId]);
+  const quote = useAsyncData(() => backend.sendToCustomer(caseId), [caseId]);
 
   const [resending, setResending] = useState(false);
   const [actionError, setActionError] = useState<{ title: string; detail?: string } | null>(null);
@@ -33,7 +33,7 @@ export default function SendToCustomerScreen() {
     setResending(true);
     setActionError(null);
     try {
-      quote.setData(await api.sendToCustomer(caseId));
+      quote.setData(await backend.sendToCustomer(caseId));
     } catch (err) {
       setActionError(toErrorInfo(err));
     } finally {

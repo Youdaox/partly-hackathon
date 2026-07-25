@@ -7,7 +7,7 @@
  * API never has to be publicly reachable.
  */
 
-import type { ApprovalPayload, CaseListItem } from '@partli/shared';
+import type { ApprovalPayload, ApprovalPick, CaseListItem } from '@partli/shared';
 
 export const API_URL = (process.env.API_URL ?? 'http://localhost:8080').replace(/\/$/, '');
 const V1 = `${API_URL}/v1`;
@@ -73,6 +73,13 @@ export const api = {
     request<ApprovalPayload>(`/approve/${token}`, {
       method: 'POST',
       body: JSON.stringify({ option_id: optionId }),
+    }),
+
+  /** The per-part form: a pick (or an explicit no) for every line. */
+  submitApprovalPicks: (token: string, picks: ApprovalPick[]) =>
+    request<ApprovalPayload>(`/approve/${token}`, {
+      method: 'POST',
+      body: JSON.stringify({ lines: picks }),
     }),
 
   listCases: async (): Promise<CaseListItem[]> => {

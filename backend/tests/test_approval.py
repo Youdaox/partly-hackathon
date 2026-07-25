@@ -165,3 +165,56 @@ def test_no_catalogue_vehicle_cannot_be_quoted(client):
     response = client.post(f"/v1/case/{case_id}/send-to-customer")
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "catalogue_unavailable"
+
+
+# --- per-part picks (the richer approval form) --------------------------------
+
+def _sent(client, rego="QMN16"):
+    case_id = make_case(client, rego)
+    token = client.post(f"/v1/case/{case_id}/send-to-customer").json()["token"]
+    payload = client.get(f"/v1/approve/{token}").json()
+    return case_id, token, payload
+
+
+def test_per_part_picks_approve_and_place_an_order(client):
+    case_id, token, payload = _sent(client)
+    lines = payload["lines"]
+    picks = [
+        {"part_id": lines[0]["part_id"], "offer_id": lines[0]["options"][0]["id"]},
+        {"part_id": lines[1]["part_id"], "action": "reject"},
+    ]
+    body = client.post(f"/v1/approve/{token}", json={"lines": picks}).json()
+    assert body["status"] == "approved"
+    assert body["approved_option"] is None, "per-part picks are not a tier"
+    actions = {p["part_id"]: p["action"] for p in body["approved_picks"]}
+    assert actions[lines[0]["part_id"]] == "accept"
+    assert actions[lines[1]["part_id"]] == "reject", "rejections are the training signal"
+
+
+def test_a_pick_without_an_offer_takes_the_recommended_one(client):
+    _, token, payload = _sent(client)
+    part = payload["lines"][0]
+    body = client.post(f"/v1/approve/{token}",
+                       json={"lines": [{"part_id": part["part_id"]}]}).json()
+    pick = body["approved_picks"][0]
+    recommended = next(o for o in part["options"] if o["recommended"])
+    assert pick["offer_id"] == recommended["id"]
+
+
+def test_both_shapes_at_once_is_rejected(client):
+    _, token, payload = _sent(client)
+    option = payload["lines"][0]["options"][0]["id"]
+    response = client.post(f"/v1/approve/{token}",
+                           json={"option_id": option,
+                                 "lines": [{"part_id": payload["lines"][0]["part_id"]}]})
+    assert response.status_code == 422
+    response = client.post(f"/v1/approve/{token}", json={})
+    assert response.status_code == 422
+
+
+def test_picks_for_parts_not_on_the_quote_cannot_approve(client):
+    _, token, _ = _sent(client)
+    response = client.post(f"/v1/approve/{token}",
+                           json={"lines": [{"part_id": "not-a-part"}]})
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "invalid_request"

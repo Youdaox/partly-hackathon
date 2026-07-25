@@ -14,6 +14,16 @@
  */
 
 import Constants from 'expo-constants';
+import type {
+  Attribution,
+  DamageReport,
+  Offer,
+  Question,
+  ReportLine,
+  SendToCustomerResponse,
+  Vehicle,
+  VehicleSummary,
+} from '@partli/shared';
 
 const PORT = 8080;
 
@@ -43,93 +53,19 @@ const resolved = resolveBaseUrl();
 export const BACKEND_BASE_URL = `${resolved.url}/v1`;
 
 // --- Wire types -------------------------------------------------------------
+//
+// The single source of truth is @partli/shared, which mirrors the /v1 contract.
+// Re-exported here under the names this client's screens already use, so a
+// contract change is a compile error rather than a runtime surprise. (This file
+// used to carry its own copies; that drift is exactly what broke rego.ts in the
+// merge.)
 
-export interface VehiclePayload {
-  vehicle_id: string;
-  /** `resolving` | `catalogue_ready` | `no_catalogue` | `not_found` */
-  status: string;
-  rego: string;
-  vin: string | null;
-  make: string | null;
-  model: string | null;
-  year: number | null;
-  model_code: string | null;
-  market: string | null;
-  steering: string | null;
-  parts_indexed: number | null;
-  resolved_ms: number | null;
-}
 
-export interface VehicleListItem {
-  slug: string;
-  rego: string;
-  make: string;
-  model: string;
-  year: number | null;
-  has_prediction: boolean;
-  has_catalogue: boolean;
-}
-
-/** One term of the noisy-OR decomposition — an exact share, not a heuristic. */
-export interface Attribution {
-  cause: string;
-  relation: string;
-  share: number;
-}
-
-export interface ReportLine {
-  part_id: string;
-  part_number: string | null;
-  name: string;
-  /** Probability this part is damaged, 0..1. */
-  p: number;
-  qty: number;
-  diagram_id?: string;
-  /** False when the diagram ships no image — do not render a hotspot over a 404. */
-  diagram_available?: boolean;
-  hotspot?: number[];
-  /** Plain English, present on the order and check sections. */
-  reason?: string;
-  confirmed?: boolean | null;
-  /** Counterfactual ordering: what to look at first. */
-  inspection_rank?: number;
-  inspection_value?: number;
-  accessible?: boolean;
-  attribution?: Attribution[];
-}
-
-export interface ClarifyingQuestion {
-  id: string;
-  text: string;
-  options: string[];
-  /** How much answering moves the report. The engine asks only when this is worth it. */
-  value: number;
-}
-
-export interface CaseReport {
-  case_id: string;
-  status: string;
-  vehicle: VehiclePayload;
-  impact: { zone: string | null; side: string | null; severity: number | null };
-  question: ClarifyingQuestion | null;
-  sections: { visible: ReportLine[]; order: ReportLine[]; check: ReportLine[] };
-  hidden_count?: number;
-  computed_ms?: number;
-  candidates?: number;
-  /** True when the vehicle has no catalogue, so claims stay class-level. */
-  degraded?: boolean;
-}
-
-export interface Offer {
-  offer_id: string;
-  supplier: string;
-  kind: string;
-  price_nzd: number;
-  lead_days: number;
-  in_stock: boolean;
-  recommended: boolean;
-  why?: string;
-}
+export type VehiclePayload = Vehicle;
+export type VehicleListItem = VehicleSummary;
+export type ClarifyingQuestion = Question;
+export type CaseReport = DamageReport;
+export type { Attribution, Offer, ReportLine };
 
 export class BackendError extends Error {
   constructor(
@@ -166,12 +102,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const body = text ? JSON.parse(text) : null;
 
   if (!response.ok) {
-    // FastAPI puts validation problems in `detail`, which may be a string or a list.
-    const detail = typeof body?.detail === 'string' ? body.detail : JSON.stringify(body?.detail);
+    // One envelope everywhere: { error: { code, message, retryable } }.
+    const envelope = body?.error;
     throw new BackendError(
       response.status,
-      body?.error ?? body?.message ?? `Request failed (${response.status})`,
-      detail,
+      envelope?.message ?? `Request failed (${response.status})`,
+      envelope?.code,
     );
   }
 
@@ -223,6 +159,12 @@ export const backend = {
     request<CaseReport>('/inspection/confirm', {
       method: 'POST',
       body: JSON.stringify({ case_id: caseId, part_id: partId, damaged }),
+    }),
+
+  /** Build the quote and mint the customer's approval link. */
+  sendToCustomer: (caseId: string) =>
+    request<SendToCustomerResponse>(`/case/${caseId}/send-to-customer`, {
+      method: 'POST',
     }),
 
   getOffers: (partId: string) =>

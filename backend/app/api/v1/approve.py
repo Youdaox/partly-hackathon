@@ -79,8 +79,17 @@ async def submit_approval(token: str, body: SubmitApprovalRequest) -> dict:
     if case is None:
         raise ApiError("case_not_found", "this approval link is not valid")
 
-    if not approval_service.has_option(case, body.option_id):
-        raise ApiError("invalid_request", f"unknown option {body.option_id}")
+    if (body.option_id is None) == (body.lines is None):
+        raise ApiError("invalid_request", "send exactly one of option_id or lines")
 
-    approval_service.approve(case, body.option_id)
+    if body.option_id is not None:
+        if not approval_service.has_option(case, body.option_id):
+            raise ApiError("invalid_request", f"unknown option {body.option_id}")
+        approval_service.approve(case, body.option_id)
+        return approval_service.payload(case)
+
+    picks = [pick.model_dump() for pick in body.lines or []]
+    accepted = approval_service.approve_lines(case, picks)
+    if accepted == 0:
+        raise ApiError("invalid_request", "no valid picks in the submission")
     return approval_service.payload(case)

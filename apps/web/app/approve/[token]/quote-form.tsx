@@ -3,35 +3,35 @@
 /**
  * The customer's side of the quote: one supplier choice per part, or decline the part.
  *
- * Offers are pre-selected to whichever the backend marks `recommended`, so a customer who
- * agrees with the recommendation can submit without touching anything.
+ * Offers are pre-selected to whichever the backend marks `recommended`, so a customer
+ * who agrees with the recommendation can submit without touching anything.
+ *
+ * Ported from the case-id-addressed page onto the token flow: the quote is fetched and
+ * submitted via `/v1/approve/{token}`, so the link a customer holds cannot be walked to
+ * another job by editing the URL.
  */
 
 import { useMemo, useState, useTransition } from 'react';
 import { CheckCircle2 } from 'lucide-react';
+import { formatLeadTime, formatPrice, type ApprovalLine, type ApprovalPick } from '@partli/shared';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import type { QuoteLine } from '@/lib/backend';
-import { finaliseOrder } from './actions';
+import { approvePicks } from './actions';
 
-const BUCKET_LABEL: Record<string, string> = {
-  visible: 'You can see these',
-  order: "You'll also need these",
-  check: 'Checked during teardown',
+const KIND_LABEL: Record<string, string> = {
+  visible: 'Seen on your vehicle',
+  hidden: 'Found before teardown',
 };
 
-const currency = (cents: number) =>
-  new Intl.NumberFormat('en-NZ', { style: 'currency', currency: 'NZD' }).format(cents);
-
-export function QuoteForm({ caseId, lines }: { caseId: string; lines: QuoteLine[] }) {
-  // Default every line to the recommended offer, falling back to the first.
+export function QuoteForm({ token, lines }: { token: string; lines: ApprovalLine[] }) {
+  // Default every line to the recommended option, falling back to the first.
   const [picks, setPicks] = useState<Record<string, string | null>>(() =>
     Object.fromEntries(
       lines.map((line) => [
         line.part_id,
-        (line.offers.find((o) => o.recommended) ?? line.offers[0])?.offer_id ?? null,
+        (line.options.find((o) => o.recommended) ?? line.options[0])?.id ?? null,
       ]),
     ),
   );
@@ -41,7 +41,7 @@ export function QuoteForm({ caseId, lines }: { caseId: string; lines: QuoteLine[
   const total = useMemo(
     () =>
       lines.reduce((sum, line) => {
-        const chosen = line.offers.find((o) => o.offer_id === picks[line.part_id]);
+        const chosen = line.options.find((o) => o.id === picks[line.part_id]);
         return chosen ? sum + chosen.price_nzd * line.qty : sum;
       }, 0),
     [lines, picks],
@@ -51,13 +51,13 @@ export function QuoteForm({ caseId, lines }: { caseId: string; lines: QuoteLine[
 
   const submit = () => {
     startTransition(async () => {
-      const payload = lines.map((line) => {
+      const payload: ApprovalPick[] = lines.map((line) => {
         const offerId = picks[line.part_id];
         return offerId
-          ? { part_id: line.part_id, offer_id: offerId, qty: line.qty, action: 'accept' as const }
-          : { part_id: line.part_id, qty: line.qty, action: 'reject' as const };
+          ? { part_id: line.part_id, offer_id: offerId, action: 'accept' as const }
+          : { part_id: line.part_id, action: 'reject' as const };
       });
-      setResult(await finaliseOrder(caseId, payload));
+      setResult(await approvePicks(token, payload));
     });
   };
 
@@ -75,28 +75,26 @@ export function QuoteForm({ caseId, lines }: { caseId: string; lines: QuoteLine[
     );
   }
 
-  // Group by bucket, preserving the backend's ordering within each.
-  const buckets = ['visible', 'order', 'check'].filter((b) =>
-    lines.some((line) => line.bucket === b),
-  );
+  // Group by kind, preserving the backend's ordering within each.
+  const kinds = ['visible', 'hidden'].filter((k) => lines.some((line) => line.kind === k));
 
   return (
     <div className="flex flex-col gap-6">
-      {buckets.map((bucket) => (
-        <section key={bucket} className="flex flex-col gap-3">
+      {kinds.map((kind) => (
+        <section key={kind} className="flex flex-col gap-3">
           <h2 className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
-            {BUCKET_LABEL[bucket] ?? bucket}
+            {KIND_LABEL[kind] ?? kind}
           </h2>
 
           {lines
-            .filter((line) => line.bucket === bucket)
+            .filter((line) => line.kind === kind)
             .map((line) => (
               <Card key={line.part_id}>
                 <CardContent className="flex flex-col gap-3 py-4">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="font-semibold">
-                        {line.name}
+                        {line.display_name}
                         {line.qty > 1 ? (
                           <span className="ml-2 text-sm font-medium text-muted-foreground">
                             ×{line.qty}
@@ -111,14 +109,14 @@ export function QuoteForm({ caseId, lines }: { caseId: string; lines: QuoteLine[
                   </div>
 
                   <div className="flex flex-col gap-2">
-                    {line.offers.map((offer) => {
-                      const selected = picks[line.part_id] === offer.offer_id;
+                    {line.options.map((option) => {
+                      const selected = picks[line.part_id] === option.id;
                       return (
                         <button
-                          key={offer.offer_id}
+                          key={option.id}
                           type="button"
                           onClick={() =>
-                            setPicks((prev) => ({ ...prev, [line.part_id]: offer.offer_id }))
+                            setPicks((prev) => ({ ...prev, [line.part_id]: option.id }))
                           }
                           aria-pressed={selected}
                           className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-3 text-left transition ${
@@ -127,19 +125,19 @@ export function QuoteForm({ caseId, lines }: { caseId: string; lines: QuoteLine[
                         >
                           <span className="min-w-0">
                             <span className="block text-sm font-medium">
-                              {offer.supplier}
+                              {option.label}
                               <span className="ml-2 text-xs uppercase text-muted-foreground">
-                                {offer.kind}
+                                {option.tier}
                               </span>
                             </span>
                             <span className="block text-xs text-muted-foreground">
-                              {offer.lead_days} day{offer.lead_days === 1 ? '' : 's'} ·{' '}
-                              {offer.in_stock ? 'in stock' : 'on back order'}
-                              {offer.why ? ` · ${offer.why}` : ''}
+                              {formatLeadTime(option.lead_days)} ·{' '}
+                              {option.in_stock ? 'in stock' : 'on back order'}
+                              {option.why ? ` · ${option.why}` : ''}
                             </span>
                           </span>
                           <span className="shrink-0 text-sm font-semibold">
-                            {currency(offer.price_nzd)}
+                            {formatPrice(option.price_nzd)}
                           </span>
                         </button>
                       );
@@ -169,7 +167,7 @@ export function QuoteForm({ caseId, lines }: { caseId: string; lines: QuoteLine[
           <span className="text-sm text-muted-foreground">
             {accepted} of {lines.length} parts
           </span>
-          <span className="text-lg font-semibold">{currency(total)}</span>
+          <span className="text-lg font-semibold">{formatPrice(total)}</span>
         </div>
         {result && !result.ok ? (
           <p className="text-sm text-destructive">{result.message}</p>

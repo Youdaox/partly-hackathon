@@ -1,8 +1,9 @@
 /**
  * The RECENT drawer: New chat, then the cases opened on this device, newest first.
  *
- * Backed by `lib/recent-cases`, not the server — the prediction backend exposes no
- * list-cases endpoint, so there is nothing to ask. See that module for what it costs.
+ * Backed by `lib/recent-cases`, not the server. The backend does expose GET /v1/cases
+ * now (the web dashboard uses it), but the device-local list survives the backend's
+ * in-memory store being restarted mid-demo, and needs no network to open the drawer.
  */
 
 import { useCallback, useEffect, useState } from 'react';

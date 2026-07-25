@@ -116,6 +116,9 @@ class Case:
     approval_token: str | None = None
     approval_lines: list[dict] = field(default_factory=list)
     approved_option: str | None = None
+    # Per-part decisions from the richer approval form; empty when a single
+    # whole-quote option was picked instead.
+    approved_picks: list[dict] = field(default_factory=list)
     approved_at: float | None = None
     analysing: set[str] = field(default_factory=set)
     created_at: float = field(default_factory=time.time)

@@ -26,13 +26,14 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { Stack, useLocalSearchParams } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
 import { Framed } from '@/components/framed';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import {
+  Button,
   EmptyState,
   ErrorNotice,
   Loading,
@@ -81,6 +82,7 @@ export default function CaseScreen() {
     said?: string;
   }>();
   const theme = useTheme();
+  const router = useRouter();
 
   const report = useAsyncData(() => backend.getResults(caseId), [caseId]);
 
@@ -544,6 +546,25 @@ export default function CaseScreen() {
           </ScrollView>
 
           <View style={[styles.footer, { borderTopColor: theme.border }]}>
+            {/* The two ways off this screen: look at the car, or quote it. */}
+            <View style={styles.actionRow}>
+              <View style={styles.actionButton}>
+                <Button
+                  title="3D inspection"
+                  variant="secondary"
+                  onPress={() => router.push(`/case/${caseId}/inspection`)}
+                  fullWidth
+                />
+              </View>
+              <View style={styles.actionButton}>
+                <Button
+                  title="Send to customer"
+                  onPress={() => router.push(`/case/${caseId}/send`)}
+                  disabled={data.sections.visible.length + data.sections.order.length === 0}
+                  fullWidth
+                />
+              </View>
+            </View>
             <View
               style={[
                 styles.followUp,
@@ -588,6 +609,8 @@ export default function CaseScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  actionRow: { flexDirection: 'row', gap: Spacing.two },
+  actionButton: { flex: 1 },
   padded: { padding: Spacing.three },
   list: { padding: Spacing.three, gap: Spacing.four, paddingBottom: Spacing.five },
 

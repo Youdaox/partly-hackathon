@@ -71,6 +71,7 @@ def payload(case: Case) -> dict:
         },
         "lines": case.approval_lines,
         "approved_option": case.approved_option,
+        "approved_picks": case.approved_picks,
         "approved_at": case.approved_at,
         "totals": _totals(case),
         "simulated": True,
@@ -105,3 +106,52 @@ def approve(case: Case, option_id: str) -> None:
     case.approved_at = time.time()
     case.status = "approved"
     cases.touch(case)
+
+
+def approve_lines(case: Case, picks: list[dict]) -> int:
+    """Per-part approval: validate every pick against the quote, then record.
+
+    Rejections are kept — they are the negative training signal (spec 6.7).
+    Returns the number of accepted lines; 0 means nothing valid was picked.
+    """
+    by_part = {line["part_id"]: line for line in case.approval_lines}
+    accepted = 0
+    total = 0.0
+    recorded: list[dict] = []
+
+    for pick in picks:
+        line = by_part.get(pick.get("part_id"))
+        if line is None:
+            continue  # not on this quote; ignore rather than fail the rest
+        entry = {"part_id": line["part_id"], "action": pick.get("action", "accept"),
+                 "offer_id": pick.get("offer_id")}
+        if entry["action"] == "accept":
+            options = line.get("options") or []
+            chosen = next((o for o in options if o["id"] == entry["offer_id"]), None)
+            if chosen is None:
+                chosen = next((o for o in options if o.get("recommended")), None)
+            if chosen is None:
+                continue
+            entry["offer_id"] = chosen["id"]
+            entry["price_nzd"] = chosen["price_nzd"]
+            total += chosen["price_nzd"] * line.get("qty", 1)
+            accepted += 1
+        recorded.append(entry)
+
+    if accepted == 0:
+        return 0
+
+    case.approved_picks = recorded
+    case.approved_option = None  # per-part picks, not a whole-quote tier
+    case.approved_at = time.time()
+    case.status = "approved"
+    case.order = {
+        "order_id": cases.new_id("ord"),
+        "state": "placed",
+        "line_count": accepted,
+        "total_nzd": round(total, 2),
+        "simulated": True,
+        "lines": recorded,
+    }
+    cases.touch(case)
+    return accepted

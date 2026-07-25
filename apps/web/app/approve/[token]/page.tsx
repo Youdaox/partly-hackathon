@@ -14,7 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { formatPrice } from '@partli/shared';
 
 import { ApiError, api } from '@/lib/api';
-import { ApprovalForm } from './approval-form';
+import { QuoteForm } from './quote-form';
 
 export const metadata: Metadata = {
   title: 'Approve your repair — Partli',
@@ -49,13 +49,9 @@ export default async function ApprovePage({
     );
   }
 
-  const {
-    vehicle,
-    lines,
-    approved_option: approvedOption,
-    approved_at: approvedAt,
-    totals,
-  } = payload;
+  const { vehicle, lines, approved_at: approvedAt, totals } = payload;
+  // Approved either way — one tier for the whole quote, or per-part picks.
+  const approved = approvedAt != null;
   const hiddenCount = lines.filter((item) => item.kind === 'hidden').length;
 
   return (
@@ -74,7 +70,7 @@ export default async function ApprovePage({
         ) : null}
       </header>
 
-      {approvedOption ? (
+      {approved ? (
         <Card className="mb-6 border-success">
           <CardContent className="flex items-start gap-3 p-5">
             <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-success" aria-hidden />
@@ -120,11 +116,14 @@ export default async function ApprovePage({
         </CardContent>
       </Card>
 
-      <h2 className="mb-3 text-sm font-medium text-muted-foreground">
-        Choose how you&apos;d like these parts supplied
-      </h2>
-
-      <ApprovalForm token={token} lines={lines} approvedOption={approvedOption} />
+      {approved ? null : (
+        <>
+          <h2 className="mb-3 text-sm font-medium text-muted-foreground">
+            Pick a supplier for each part, or tell us to leave it
+          </h2>
+          <QuoteForm token={token} lines={lines} />
+        </>
+      )}
 
       <p className="mt-8 text-center text-xs text-muted-foreground">
         Indicative pricing from {formatPrice(totals.cheapest_nzd)}, confirmed by your

@@ -54,7 +54,22 @@ class FinaliseRequest(BaseModel):
     lines: list[OrderLineRequest]
 
 
-class SubmitApprovalRequest(BaseModel):
-    """The customer picking one supply option for the whole quote."""
+class ApprovalPick(BaseModel):
+    """One per-part decision: a chosen offer, or an explicit leave-it-out."""
 
-    option_id: str
+    part_id: str
+    offer_id: str | None = None
+    action: str = Field(default="accept", pattern="^(accept|reject)$")
+
+
+class SubmitApprovalRequest(BaseModel):
+    """The customer approving the quote.
+
+    Two shapes, because the two approval UIs ask differently:
+      option_id  one supply tier applied to the whole quote
+      lines      a pick per part (the richer per-part form)
+    Exactly one must be present.
+    """
+
+    option_id: str | None = None
+    lines: list[ApprovalPick] | None = None

@@ -322,6 +322,13 @@ export interface ApprovalLine {
   options: ApprovalOption[];
 }
 
+/** One per-part decision submitted from the approval form. */
+export interface ApprovalPick {
+  part_id: PartId;
+  offer_id?: string;
+  action: 'accept' | 'reject';
+}
+
 export interface ApprovalPayload {
   case_id: string;
   status: CaseStatus;
@@ -332,7 +339,10 @@ export interface ApprovalPayload {
     year: number | null;
   };
   lines: ApprovalLine[];
+  /** Set when the customer picked one supply tier for the whole quote. */
   approved_option: string | null;
+  /** Set when the customer decided part by part instead. */
+  approved_picks: ApprovalPick[];
   /** Unix seconds. */
   approved_at: number | null;
   totals: { cheapest_nzd: number; recommended_nzd: number };

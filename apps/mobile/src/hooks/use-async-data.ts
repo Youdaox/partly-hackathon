@@ -6,14 +6,14 @@
  * all handle failure the same way.
  *
  * ```ts
- * const jobs = useAsyncData(() => api.getReport(caseId), [caseId]);
+ * const jobs = useAsyncData(() => backend.getResults(caseId), [caseId]);
  * jobs.data; jobs.error; jobs.loading; await jobs.reload();
  * ```
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { ApiError } from '@/lib/api';
+import { BackendError } from '@/lib/backend';
 
 export interface AsyncData<T> {
   data: T | null;
@@ -28,7 +28,7 @@ export interface AsyncData<T> {
 }
 
 export function toErrorInfo(error: unknown): { title: string; detail?: string } {
-  if (error instanceof ApiError) {
+  if (error instanceof BackendError) {
     return { title: error.message, detail: error.detail };
   }
   return { title: error instanceof Error ? error.message : 'Something went wrong' };
