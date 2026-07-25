@@ -142,6 +142,68 @@ function useCascade(report: CaseReport | null) {
   return { changes, departed };
 }
 
+type SectionKey = 'visible' | 'order' | 'check';
+
+/**
+ * A collapsible section header.
+ *
+ * The report runs to twenty-odd parts across three groups, which is a very long scroll for
+ * a phone held in one hand at the side of a car. Collapsing means the whole job is legible
+ * without scrolling at all — three headings and their counts — and only the group being
+ * worked on is expanded.
+ */
+function SectionBar({
+  title,
+  count,
+  intro,
+  open,
+  onPress,
+}: {
+  title: string;
+  count: number;
+  intro: string;
+  open: boolean;
+  onPress: () => void;
+}) {
+  const theme = useTheme();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ expanded: open }}
+      accessibilityLabel={`${title}, ${count} parts`}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.sectionBar,
+        {
+          borderColor: theme.border,
+          backgroundColor: open ? theme.badgeFill : theme.backgroundElement,
+          opacity: pressed ? 0.7 : 1,
+        },
+      ]}
+    >
+      <View style={styles.sectionBarHead}>
+        <ThemedText type="section" style={styles.grow}>
+          {title}
+        </ThemedText>
+        <ThemedText type="section" style={{ color: theme.textSecondary }}>
+          {count}
+        </ThemedText>
+        <Ionicons
+          name={open ? 'chevron-up' : 'chevron-down'}
+          size={18}
+          color={theme.textSecondary}
+        />
+      </View>
+      {/* The intro only earns its line when the section is open. */}
+      {open ? (
+        <ThemedText type="small" themeColor="textSecondary">
+          {intro}
+        </ThemedText>
+      ) : null}
+    </Pressable>
+  );
+}
+
 /** ✓ / ✗ — the only interaction: two taps, greasy hands. */
 function ConfirmRow({
   line,
@@ -366,6 +428,14 @@ export function CaseReportView({
   const theme = useTheme();
   const cascade = useCascade(report);
 
+  /**
+   * Which group is expanded. Hidden damage on arrival: it is what the product is for, and
+   * the only group with a decision attached to every row.
+   */
+  const [openSection, setOpenSection] = useState<SectionKey | null>('order');
+  const toggleSection = (key: SectionKey) =>
+    setOpenSection((current) => (current === key ? null : key));
+
   const resolving = vehicle?.status === 'resolving';
 
   /**
@@ -551,73 +621,71 @@ export function CaseReportView({
       ) : null}
 
       {/* --- Visible damage: facts, deliberately quiet --------------------- */}
-      <View style={styles.sectionHead}>
-        <ThemedText type="section">Visible damage</ThemedText>
-        <ThemedText type="small" themeColor="textSecondary">
-          {report.sections.visible.length}
-        </ThemedText>
-      </View>
-      <ThemedText type="small" themeColor="textSecondary" style={styles.sectionIntro}>
-        What the camera saw. Remove anything that is not actually damaged.
-      </ThemedText>
-      {report.sections.visible.length === 0 ? (
-        <EmptyState message="Nothing recorded as visible yet." />
-      ) : (
-        <View style={styles.seenGroup}>{report.sections.visible.map(visibleLine)}</View>
-      )}
+      <SectionBar
+        title="Visible damage"
+        count={report.sections.visible.length}
+        intro="What the camera saw. Remove anything that is not actually damaged."
+        open={openSection === 'visible'}
+        onPress={() => toggleSection('visible')}
+      />
+      {openSection === 'visible' ? (
+        report.sections.visible.length === 0 ? (
+          <EmptyState message="Nothing recorded as visible yet." />
+        ) : (
+          <View style={styles.seenGroup}>{report.sections.visible.map(visibleLine)}</View>
+        )
+      ) : null}
 
       {/* --- Hidden damage: the hero -------------------------------------- */}
-      <View style={styles.sectionHead}>
-        <ThemedText type="section">Hidden damage — what we predict</ThemedText>
-        <ThemedText type="small" themeColor="textSecondary">
-          {report.sections.order.length}
-        </ThemedText>
-      </View>
-      <ThemedText type="small" themeColor="textSecondary" style={styles.sectionIntro}>
-        In no photo. Order these with the panels — tick or cross one and the parts behind
-        it move.
-      </ThemedText>
-
-      {/* So the tap registers as having moved the model, not just the one row. */}
-      {cascade.changes.size > 0 || cascade.departed > 0 ? (
-        <View style={[styles.cascadeNote, { borderColor: theme.accent }]}>
-          <Ionicons name="git-branch-outline" size={15} color={theme.accent} />
-          <ThemedText type="smallBold" style={{ color: theme.accent }}>
-            {cascade.changes.size + cascade.departed} part
-            {cascade.changes.size + cascade.departed === 1 ? '' : 's'} re-ranked
-            {cascade.departed > 0 ? ` · ${cascade.departed} dropped out` : ''}
-          </ThemedText>
-        </View>
+      <SectionBar
+        title="Hidden damage — what we predict"
+        count={report.sections.order.length}
+        intro="In no photo. Order these with the panels — tick or cross one and the parts behind it move."
+        open={openSection === 'order'}
+        onPress={() => toggleSection('order')}
+      />
+      {openSection === 'order' ? (
+        <>
+          {/* So the tap registers as having moved the model, not just the one row. */}
+          {cascade.changes.size > 0 || cascade.departed > 0 ? (
+            <View style={[styles.cascadeNote, { borderColor: theme.accent }]}>
+              <Ionicons name="git-branch-outline" size={15} color={theme.accent} />
+              <ThemedText type="smallBold" style={{ color: theme.accent }}>
+                {cascade.changes.size + cascade.departed} part
+                {cascade.changes.size + cascade.departed === 1 ? '' : 's'} re-ranked
+                {cascade.departed > 0 ? ` · ${cascade.departed} dropped out` : ''}
+              </ThemedText>
+            </View>
+          ) : null}
+          {report.sections.order.length === 0 ? (
+            <EmptyState message="Nothing else implied yet." />
+          ) : (
+            <View style={styles.heroGroup}>
+              {report.sections.order.map((line, index) => (
+                <HiddenRow
+                  key={line.part_id}
+                  line={line}
+                  index={index}
+                  busy={busyId === line.part_id}
+                  change={cascade.changes.get(line.part_id)}
+                  onConfirm={onConfirm}
+                />
+              ))}
+            </View>
+          )}
+        </>
       ) : null}
-      {report.sections.order.length === 0 ? (
-        <EmptyState message="Nothing else implied yet." />
-      ) : (
-        <View style={styles.heroGroup}>
-          {report.sections.order.map((line, index) => (
-            <HiddenRow
-              key={line.part_id}
-              line={line}
-              index={index}
-              busy={busyId === line.part_id}
-              change={cascade.changes.get(line.part_id)}
-              onConfirm={onConfirm}
-            />
-          ))}
-        </View>
-      )}
 
       {/* --- Check on teardown: an action, not a list ---------------------- */}
-      <View style={styles.sectionHead}>
-        <ThemedText type="section">Check on teardown</ThemedText>
-        <ThemedText type="small" themeColor="textSecondary">
-          {report.sections.check.length}
-        </ThemedText>
-      </View>
-      <ThemedText type="small" themeColor="textSecondary" style={styles.sectionIntro}>
-        Look at these when it&apos;s apart, in this order — each answer settles the most.
-      </ThemedText>
+      <SectionBar
+        title="Check on teardown"
+        count={report.sections.check.length}
+        intro="Look at these when it's apart, in this order — each answer settles the most."
+        open={openSection === 'check'}
+        onPress={() => toggleSection('check')}
+      />
 
-      {report.sections.check.map((line) => {
+      {openSection === 'check' && report.sections.check.map((line) => {
         const open = expanded === line.part_id;
         return (
           <View
@@ -840,6 +908,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+
+  grow: { flex: 1 },
+  // A tappable section header, sized like a card so the three of them read as the
+  // top level of the report when they are all closed.
+  sectionBar: {
+    gap: Spacing.two,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.card,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.three,
+  },
+  sectionBarHead: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
 
   sectionHead: {
     flexDirection: 'row',
