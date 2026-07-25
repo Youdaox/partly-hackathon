@@ -6,7 +6,9 @@ exercise the `no_catalogue` path (spec 6.2) which is a success case, not an erro
 
 Only three of the eight actually ship an assemblies.json in this dataset
 (yaris, santafe, epace) — the other five resolve and have an Interpreter
-prediction but no catalogue to index.
+prediction but no catalogue to index. Those three are ALLOWED_REGOS, and they
+are the only ones `/vehicle/register` accepts; the map keeps the rest so the
+resolver still has something to say about a plate it recognises.
 """
 
 # rego -> (slug | None, make, model, year, vin | None)
@@ -26,6 +28,13 @@ REGO_MAP: dict[str, tuple[str | None, str, str, int | None, str | None]] = {
     "NNS414": (None, "Suzuki", "Unknown", None, None),
 }
 
+# The registrations a case may actually be opened against: the three that ship a
+# full OEM catalogue *and* an Interpreter prediction. The other nine resolve to
+# a make and model but have nothing to propagate over, and a hidden-damage
+# report with no catalogue behind it is worse than a clear refusal — it looks
+# like an answer. Registration rejects them by name (spec 6.2 / rego_not_allowed).
+ALLOWED_REGOS: tuple[str, ...] = ("QMN16", "PNS53", "RFH447")
+
 # Simulated VIN resolution latency (spec 4.2: 800-5000 ms). Kept short enough
 # that a demo does not stall; the client shows progress either way.
 RESOLVE_MS_MIN = 800
@@ -34,3 +43,21 @@ RESOLVE_MS_MAX = 2600
 
 def normalise(rego: str) -> str:
     return "".join(ch for ch in rego.upper() if ch.isalnum())
+
+
+def allowed_vehicles() -> list[dict]:
+    """The three permitted vehicles, for the picker the client renders."""
+    vehicles = []
+    for rego in ALLOWED_REGOS:
+        slug, make, model, year, _vin = REGO_MAP[rego]
+        vehicles.append(
+            {"rego": rego, "make": make, "model": model, "year": year, "slug": slug}
+        )
+    return vehicles
+
+
+def allowed_summary() -> str:
+    """"QMN16 (Toyota Yaris), PNS53 (...), RFH447 (...)" — for the error text."""
+    return ", ".join(
+        f"{v['rego']} ({v['make']} {v['model']})" for v in allowed_vehicles()
+    )

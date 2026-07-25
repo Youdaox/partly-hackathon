@@ -36,8 +36,12 @@ from app.engines.types import Edge, Evidence, Inspection, Part, Prediction, Ques
 from app.tables.constants import (
     ACCESSIBLE_MARGIN,
     CHECK_MIN,
+    CONSUMABLE_KLASSES,
     ORDER_MIN,
+    QUESTION_BAND_MAX,
+    QUESTION_BAND_MIN,
     QUESTION_MIN_BUCKET_MOVES,
+    QUESTION_MIN_DOWNSTREAM,
 )
 
 
@@ -135,25 +139,31 @@ def next_question(
     history: History = EMPTY_HISTORY,
     conflicts: list[dict] | None = None,
     asked: frozenset[str] = frozenset(),
+    inspections: list[Inspection] | None = None,
 ) -> Question | None:
-    """At most one question per case, and only when it clears the bar:
-    at least QUESTION_MIN_BUCKET_MOVES parts change bucket depending on the
-    answer, the repairer can answer it standing where they are, and no
-    question has been asked already (spec 9.5).
+    """At most one question, and only one the repairer can answer by looking.
 
-    The highest-value questions are almost always severity discriminators,
-    because severity moves the depth gate for every part at once.
+    The old questions asked about the crash — whether the wheels ended up
+    straight, whether the airbags fired, whether the door still shuts. He was
+    not there. He is standing at the car in a shop, possibly days later, and
+    being asked to reconstruct an event he never saw. They were also the same
+    three every time, so they read as a form to fill in rather than as the
+    assistant needing to know something.
+
+    What replaces them is drawn from this case's own predictions: point him at
+    one specific part he can reach, that the model is genuinely undecided
+    about, and whose answer settles other parts too. If no part is all three,
+    ask nothing — silence is better than a question with a good score and no
+    consequence.
+
+    `q_side` survives because it is not a crash question: the frames disagree
+    about which corner, and which corner it is can be seen from where he
+    stands.
+
+    The ranking is `rank_inspections`' — passed in rather than recomputed,
+    since the orchestrator has already paid for it.
     """
-    candidates: list[Question] = []
-
-    def moves(a: dict[str, Prediction], b: dict[str, Prediction]) -> tuple[int, float]:
-        changed = 0
-        shift = 0.0
-        for pid in a.keys() & b.keys():
-            shift += abs(a[pid].p - b[pid].p)
-            if _bucket(a[pid].p) != _bucket(b[pid].p):
-                changed += 1
-        return changed, shift
+    by_id = {part.part_id: part for part in parts}
 
     # Side: asked when the frames disagree or nothing has settled it. Halves
     # the candidate set (spec 9.5) — the Yaris's own Interpreter output really
@@ -162,36 +172,52 @@ def next_question(
     if "q_side" not in asked and (side_conflict or evidence.side in ("C", "", None)):
         left = propagate(parts, edges, replace(evidence, side="L"), history)
         right = propagate(parts, edges, replace(evidence, side="R"), history)
-        changed, shift = moves(left, right)
+        changed = sum(
+            1
+            for pid in left.keys() & right.keys()
+            if by_id[pid].klass not in CONSUMABLE_KLASSES
+            and _bucket(left[pid].p) != _bucket(right[pid].p)
+        )
         if changed >= QUESTION_MIN_BUCKET_MOVES:
-            candidates.append(
-                Question(
-                    id="q_side",
-                    text="Is the damage on the right corner, the left, or both?",
-                    options=["Right", "Left", "Both"],
-                    value=round(shift, 4),
-                )
+            return Question(
+                id="q_side",
+                text="Which corner took the hit — right, left, or both?",
+                options=["Right", "Left", "Both"],
+                value=float(changed),
             )
 
-    # Severity discriminators, phrased as things a repairer can check from
-    # where they stand (spec 9.3's ladder definitions).
-    severity_questions = [
-        ("q_wheels", "Are the wheels sitting straight?", ["Yes", "No", "Can't tell"], 3, 4),
-        ("q_airbags", "Did the airbags go off?", ["No", "Yes"], 3, 4),
-        ("q_door", "Does the driver's door still shut properly?", ["Yes", "No"], 4, 5),
-    ]
-    for qid, text, options, low, high in severity_questions:
-        if qid in asked:
+    # Then: the most informative part he could go and look at right now.
+    best: Inspection | None = None
+    for item in inspections or ():
+        part = by_id.get(item.part_id)
+        prediction = predictions.get(item.part_id)
+        if part is None or prediction is None:
             continue
-        # Only worth asking when the current estimate straddles the boundary.
-        if not (low - 1 <= evidence.severity <= high):
+        if f"q_check_{item.part_id}" in asked:
             continue
-        at_low = propagate(parts, edges, replace(evidence, severity=low), history)
-        at_high = propagate(parts, edges, replace(evidence, severity=high), history)
-        changed, shift = moves(at_low, at_high)
-        if changed >= QUESTION_MIN_BUCKET_MOVES:
-            candidates.append(Question(id=qid, text=text, options=options, value=round(shift, 4)))
+        # Reachable without taking the car apart further.
+        if not item.accessible:
+            continue
+        # Genuinely undecided — anything already high or already low is settled
+        # enough that an answer would not move it.
+        if not (QUESTION_BAND_MIN <= prediction.p <= QUESTION_BAND_MAX):
+            continue
+        # Nobody inspects a clip. Consumables are also folded under their parent
+        # in the report, so settling one changes nothing he can see.
+        if part.klass in CONSUMABLE_KLASSES:
+            continue
+        # It has to settle *other* parts, not just itself.
+        if item.downstream < QUESTION_MIN_DOWNSTREAM:
+            continue
+        if best is None or item.downstream > best.downstream:
+            best = item
 
-    if not candidates:
+    if best is None:
         return None
-    return max(candidates, key=lambda q: q.value)
+
+    return Question(
+        id=f"q_check_{best.part_id}",
+        text=f"Take a look at the {by_id[best.part_id].name} — is it damaged?",
+        options=["Damaged", "Looks fine", "Can't tell"],
+        value=round(best.value, 4),
+    )

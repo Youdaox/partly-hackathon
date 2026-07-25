@@ -9,10 +9,12 @@ from fastapi.responses import JSONResponse
 # code -> (http status, retryable)
 ERROR_CODES: dict[str, tuple[int, bool]] = {
     "rego_not_found": (404, False),
+    "rego_not_allowed": (422, False),
     "vehicle_not_found": (404, False),
     "vehicle_not_ready": (409, True),
     "catalogue_unavailable": (200, False),
     "case_not_found": (404, False),
+    "media_not_found": (404, False),
     "media_too_large": (413, False),
     "unsupported_media": (415, False),
     "transcription_failed": (502, True),

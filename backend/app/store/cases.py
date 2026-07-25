@@ -41,6 +41,9 @@ class Vehicle:
     steering: str | None = None
     configuration: dict = field(default_factory=dict)
     parts_indexed: int = 0
+    # Part-to-part connections built for this vehicle. The prediction is a walk
+    # over these, so it is worth showing alongside the part count.
+    edges_indexed: int = 0
     resolved_ms: int | None = None
     created_at: float = field(default_factory=time.time)
 
@@ -61,6 +64,14 @@ class Message:
 
 @dataclass(slots=True)
 class MediaAsset:
+    """One stored file. `id` is the stable media_id the client refers to.
+
+    `filename` and `content_type` are what the repairer's device sent, kept
+    verbatim so the app can show them exactly what they added — a derived
+    asset (a keyframe, a demuxed audio track) has neither and carries a
+    `parent_id` instead.
+    """
+
     id: str
     case_id: str
     kind: str  # image|video|audio|frame
@@ -68,6 +79,9 @@ class MediaAsset:
     message_id: str | None = None
     parent_id: str | None = None
     bytes: int = 0
+    filename: str | None = None
+    content_type: str | None = None
+    uploaded_at: float = field(default_factory=time.time)
     processed_at: float | None = None
 
 
@@ -128,6 +142,8 @@ class Case:
 _vehicles: dict[str, Vehicle] = {}
 _vehicles_by_rego: dict[str, str] = {}
 _cases: dict[str, Case] = {}
+# media_id -> asset, so a thumbnail request does not scan every open case.
+_media: dict[str, MediaAsset] = {}
 
 
 # --- Vehicles ---------------------------------------------------------------
@@ -195,8 +211,27 @@ def add_media(case: Case, **kwargs: Any) -> MediaAsset:
     asset = MediaAsset(id=new_id("med"), case_id=case.id, **kwargs)
     with _lock:
         case.media.append(asset)
+        _media[asset.id] = asset
         touch(case)
     return asset
+
+
+def get_media(media_id: str) -> MediaAsset | None:
+    """One asset by its stable id, for serving the bytes back as a thumbnail."""
+    with _lock:
+        return _media.get(media_id)
+
+
+def uploaded_media(case: Case) -> list[MediaAsset]:
+    """What the repairer actually uploaded, oldest first.
+
+    Keyframes and demuxed audio tracks are excluded: they are things this
+    service made from an upload, not things anyone chose to send, and counting
+    them would mean two photos came back as ten rows.
+    """
+    with _lock:
+        assets = [asset for asset in case.media if asset.parent_id is None]
+    return sorted(assets, key=lambda asset: asset.uploaded_at)
 
 
 def add_observations(case: Case, observations: list[Observation]) -> None:
@@ -222,6 +257,8 @@ def _expire() -> None:
     with _lock:
         stale = [cid for cid, case in _cases.items() if case.updated_at < cutoff]
         for cid in stale:
+            for asset in _cases[cid].media:
+                _media.pop(asset.id, None)
             del _cases[cid]
 
 
@@ -236,3 +273,4 @@ def reset() -> None:
         _vehicles.clear()
         _vehicles_by_rego.clear()
         _cases.clear()
+        _media.clear()

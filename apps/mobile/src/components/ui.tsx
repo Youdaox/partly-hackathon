@@ -114,6 +114,36 @@ export function ConfidenceBar({ value }: { value: number }) {
   );
 }
 
+// --- Likelihood -------------------------------------------------------------
+
+/**
+ * The one confidence treatment, and it belongs only to predictions.
+ *
+ * A repairer does not act differently on 0.78 than on 0.81, so the raw
+ * percentage was precision nobody used and noise everybody read. Three bands
+ * are what the decision actually has: order it, probably order it, look first.
+ *
+ * Never rendered next to observed damage — a part Partly saw in the photo is a
+ * fact, and a number beside it reads as hedging.
+ */
+export function LikelihoodChip({ value }: { value: number }) {
+  const theme = useTheme();
+  const { label, color } =
+    value >= 0.8
+      ? { label: 'High', color: theme.danger }
+      : value >= 0.6
+        ? { label: 'Medium', color: theme.warning }
+        : { label: 'Low', color: theme.textSecondary };
+
+  return (
+    <View style={[styles.likelihoodChip, { borderColor: color }]}>
+      <ThemedText type="small" style={{ color }}>
+        {label}
+      </ThemedText>
+    </View>
+  );
+}
+
 // --- Status pill ------------------------------------------------------------
 
 export function Pill({ label, tone = 'neutral' }: { label: string; tone?: 'neutral' | 'accent' | 'success' }) {
@@ -258,8 +288,8 @@ export function SuggestionRow({
 
 const styles = StyleSheet.create({
   matchBadge: {
-    paddingHorizontal: Spacing.two,
-    paddingVertical: Spacing.one,
+    paddingHorizontal: Spacing.three - 4,
+    paddingVertical: Spacing.one + 2,
     borderRadius: Radius.chip,
     borderWidth: 1,
   },
@@ -268,16 +298,16 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   numberBadge: {
-    width: 22,
-    height: 22,
+    width: 26,
+    height: 26,
     borderRadius: Radius.round,
     alignItems: 'center',
     justifyContent: 'center',
   },
   numberBadgeText: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '700',
-    lineHeight: 16,
+    lineHeight: 18,
   },
   suggestionRow: {
     flexDirection: 'row',
@@ -329,6 +359,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.two,
     paddingVertical: Spacing.half,
     borderRadius: Spacing.four,
+    alignSelf: 'flex-start',
+  },
+  likelihoodChip: {
+    paddingHorizontal: Spacing.one,
+    paddingVertical: 1,
+    borderRadius: Spacing.four,
+    borderWidth: StyleSheet.hairlineWidth,
     alignSelf: 'flex-start',
   },
   errorDetail: {

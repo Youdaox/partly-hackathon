@@ -21,6 +21,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { CaseReportView, MessageBubble } from '@/components/case-report';
 import { Composer } from '@/components/composer';
+import { Framed } from '@/components/framed';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
@@ -102,7 +103,7 @@ export default function CaseScreen() {
             />
           </ScrollView>
 
-          <View style={[styles.dock, { borderTopColor: theme.border }]}>
+          <Framed style={styles.dock}>
             <Composer
               value={draft}
               onChangeText={setDraft}
@@ -120,7 +121,7 @@ export default function CaseScreen() {
               </ThemedText>
               <Ionicons name="chevron-forward" size={15} color={theme.accent} />
             </Pressable>
-          </View>
+          </Framed>
         </ThemedView>
       </KeyboardAvoidingView>
     </>
