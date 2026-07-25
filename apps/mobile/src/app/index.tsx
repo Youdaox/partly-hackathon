@@ -1,12 +1,13 @@
 /**
  * Screen 1 — the entry screen.
  *
- * One prompt box, nothing else. The repairer says what they are looking at in a single
- * sentence — "yaris front right hit, bumper hanging off" — and lands in a live job: the
+ * One prompt box, nothing else above it. The repairer says what they are looking at in a
+ * single sentence — "yaris front right hit, bumper's off" — and lands in a live job: the
  * vehicle is resolved, the job created, the damage recorded.
  *
- * Deliberately empty below the input. The only thing that ever appears there is an
- * error, because otherwise a failed submit looks like nothing happened.
+ * Below the box are three tap-to-run starters. They exist because the sentence has to
+ * name the car and there is no vehicle picker, so a repairer who types "bumper's off"
+ * needs a way to find out what the app can actually assess.
  */
 
 import { useCallback, useState } from 'react';
@@ -20,17 +21,23 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { matchVehicle, type VehicleSummary } from '@partli/shared';
 
+import { Framed } from '@/components/framed';
+import { RecentDrawer } from '@/components/recent-drawer';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { NoFocusRing, Spacing } from '@/constants/theme';
+import { SuggestionRow } from '@/components/ui';
+import { NoFocusRing, Radius, Spacing, TapTarget } from '@/constants/theme';
 import { toErrorInfo, useAsyncData } from '@/hooks/use-async-data';
 import { useTheme } from '@/hooks/use-theme';
 import { useVoiceCapture } from '@/hooks/use-voice-capture';
 import { api } from '@/lib/api';
+
+/** Pre-filled starter, so the demo does not depend on remembering the phrasing. */
+const EXAMPLE = 'yaris front right hit, bumper hanging off';
 
 export default function EntryScreen() {
   const router = useRouter();
@@ -43,6 +50,7 @@ export default function EntryScreen() {
   const [draft, setDraft] = useState('');
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<{ title: string; detail?: string } | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const startable = (vehicles.data ?? []).filter((v) => v.hasCatalogue);
 
@@ -51,25 +59,33 @@ export default function EntryScreen() {
       setStarting(true);
       setError(null);
 
+      const said = damageText.trim();
+
       try {
         // Seeding from the shipped AI prediction means the job opens already populated,
         // and anything typed is layered on top (the same part twice is an upsert).
         const job = await api.createJob(vehicle.slug, true);
 
         let unmatched: string | undefined;
-        if (damageText.trim()) {
+        if (said) {
           try {
-            await api.addDamage(job.id, damageText, 'voice');
+            await api.addDamage(job.id, said, 'voice');
           } catch {
             // No catalogue part matched the wording. Don't lose what they typed —
-            // hand it to the capture screen so they can reword it there.
-            unmatched = damageText;
+            // hand it to the next screen so they can reword it in the follow-up box.
+            unmatched = said;
           }
         }
 
+        // Straight to the diagnosis. The oracle runs on arrival, so the first thing the
+        // repairer sees is ranked hidden damage rather than an empty capture form.
         router.push({
-          pathname: '/job/[id]/capture',
-          params: unmatched ? { id: job.id, draft: unmatched } : { id: job.id },
+          pathname: '/job/[id]/hidden',
+          params: {
+            id: job.id,
+            ...(said ? { said } : {}),
+            ...(unmatched ? { draft: unmatched } : {}),
+          },
         });
         setDraft('');
       } catch (err) {
@@ -116,101 +132,169 @@ export default function EntryScreen() {
     }
   }, [voice]);
 
+  /** Third starter: answer the "which cars?" question without leaving the screen. */
+  const showVehicles = useCallback(() => {
+    setError({
+      title: startable.length ? 'Vehicles with a parts catalogue' : 'No catalogue vehicles found',
+      detail: startable.length
+        ? `${startable.map((v) => `${v.make} ${v.model}`).join(', ')}. Name one in your sentence.`
+        : 'Is the API running?',
+    });
+  }, [startable]);
+
   const hasText = draft.trim().length > 0;
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={90}
-    >
-      <ThemedView style={styles.container}>
-        <ScrollView
-          contentContainerStyle={styles.scroll}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={styles.hero}>
-            <ThemedText style={styles.heading}>What are we looking at?</ThemedText>
-
-            <View
-              style={[
-                styles.prompt,
-                { backgroundColor: theme.background, borderColor: theme.border },
-              ]}
+    <>
+      <Stack.Screen
+        options={{
+          title: 'Partli',
+          headerTitleAlign: 'center',
+          headerLeft: () => (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Open recent jobs"
+              onPress={() => setMenuOpen(true)}
+              hitSlop={12}
+              style={styles.headerButton}
             >
-              <Ionicons name="add" size={24} color={theme.textSecondary} />
+              <Ionicons name="menu" size={24} color={theme.accent} />
+            </Pressable>
+          ),
+          headerRight: () => (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="New job"
+              onPress={() => {
+                setDraft('');
+                setError(null);
+              }}
+              hitSlop={12}
+              style={styles.headerButton}
+            >
+              <Ionicons name="add" size={26} color={theme.accent} />
+            </Pressable>
+          ),
+        }}
+      />
 
-              <TextInput
-                value={draft}
-                onChangeText={setDraft}
-                placeholder="Describe the vehicle and damage"
-                placeholderTextColor={theme.textSecondary}
-                onSubmitEditing={submit}
-                returnKeyType="go"
-                style={[styles.promptInput, { color: theme.text }, NoFocusRing]}
-              />
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={90}
+      >
+        <ThemedView style={styles.container}>
+          <ScrollView
+            contentContainerStyle={styles.scroll}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.hero}>
+              <ThemedText type="heading" style={styles.heading}>
+                What&apos;s going on with the car?
+              </ThemedText>
 
-              <Pressable
-                onPress={toggleRecording}
-                accessibilityRole="button"
-                accessibilityLabel={voice.isRecording ? 'Stop recording' : 'Start recording'}
-                disabled={voice.status === 'unavailable'}
-                hitSlop={8}
-                style={({ pressed }) => [
-                  styles.micButton,
-                  { opacity: voice.status === 'unavailable' ? 0.3 : pressed ? 0.5 : 1 },
-                ]}
-              >
-                <Ionicons
-                  name={voice.isRecording ? 'stop-circle' : 'mic-outline'}
-                  size={22}
-                  color={voice.isRecording ? theme.danger : theme.textSecondary}
-                />
-              </Pressable>
+              <Framed rules={false}>
+                <View
+                  style={[
+                    styles.prompt,
+                    { backgroundColor: theme.backgroundElement, borderColor: theme.border },
+                  ]}
+                >
+                  <Ionicons name="add" size={24} color={theme.iconMuted} />
 
-              <Pressable
-                onPress={submit}
-                accessibilityRole="button"
-                accessibilityLabel="Start job"
-                disabled={!hasText || starting}
-                style={({ pressed }) => [
-                  styles.submitButton,
-                  {
-                    backgroundColor: hasText ? theme.text : theme.backgroundSelected,
-                    opacity: pressed ? 0.8 : 1,
-                  },
-                ]}
-              >
-                {starting ? (
-                  <ActivityIndicator size="small" color={theme.background} />
-                ) : (
-                  <Ionicons
-                    name="arrow-up"
-                    size={20}
-                    color={hasText ? theme.background : theme.textSecondary}
+                  <TextInput
+                    value={draft}
+                    onChangeText={setDraft}
+                    placeholder="Describe the vehicle and damage"
+                    placeholderTextColor={theme.textSecondary}
+                    onSubmitEditing={submit}
+                    returnKeyType="go"
+                    style={[styles.promptInput, { color: theme.text }, NoFocusRing]}
                   />
-                )}
-              </Pressable>
-            </View>
 
-            {/* The only thing that ever sits under the box. */}
-            {error ? (
-              <View style={styles.error}>
-                <ThemedText type="small" style={{ color: theme.danger }}>
-                  {error.title}
-                </ThemedText>
-                {error.detail ? (
-                  <ThemedText type="small" themeColor="textSecondary" style={styles.errorDetail}>
-                    {error.detail}
-                  </ThemedText>
-                ) : null}
+                  <Pressable
+                    onPress={toggleRecording}
+                    accessibilityRole="button"
+                    accessibilityLabel={voice.isRecording ? 'Stop recording' : 'Start recording'}
+                    disabled={voice.status === 'unavailable'}
+                    hitSlop={8}
+                    style={({ pressed }) => [
+                      styles.micButton,
+                      { opacity: voice.status === 'unavailable' ? 0.3 : pressed ? 0.5 : 1 },
+                    ]}
+                  >
+                    <Ionicons
+                      name={voice.isRecording ? 'stop-circle' : 'mic-outline'}
+                      size={22}
+                      color={voice.isRecording ? theme.danger : theme.iconMuted}
+                    />
+                  </Pressable>
+
+                  <Pressable
+                    onPress={submit}
+                    accessibilityRole="button"
+                    accessibilityLabel="Start job"
+                    disabled={!hasText || starting}
+                    style={({ pressed }) => [
+                      styles.submitButton,
+                      {
+                        backgroundColor: hasText ? theme.accent : theme.backgroundSelected,
+                        opacity: pressed ? 0.8 : 1,
+                      },
+                    ]}
+                  >
+                    {starting ? (
+                      <ActivityIndicator size="small" color={theme.accentText} />
+                    ) : (
+                      <Ionicons
+                        name="arrow-up"
+                        size={20}
+                        color={hasText ? theme.accentText : theme.textSecondary}
+                      />
+                    )}
+                  </Pressable>
+                </View>
+              </Framed>
+
+              <View style={styles.suggestions}>
+                <SuggestionRow
+                  icon="car-sport-outline"
+                  label="Try an example walkaround"
+                  onPress={() => setDraft(EXAMPLE)}
+                />
+                <SuggestionRow
+                  icon="mic-outline"
+                  label="Describe the damage out loud"
+                  onPress={toggleRecording}
+                />
+                <SuggestionRow
+                  icon="list-outline"
+                  label="Which vehicles can I assess?"
+                  onPress={showVehicles}
+                />
               </View>
-            ) : null}
-          </View>
-        </ScrollView>
-      </ThemedView>
-    </KeyboardAvoidingView>
+
+              {/* The only thing that ever sits under the starters. */}
+              {error ? (
+                <View style={styles.error}>
+                  <ThemedText type="small" style={{ color: theme.danger }}>
+                    {error.title}
+                  </ThemedText>
+                  {error.detail ? (
+                    <ThemedText type="small" themeColor="textSecondary" style={styles.errorDetail}>
+                      {error.detail}
+                    </ThemedText>
+                  ) : null}
+                </View>
+              ) : null}
+            </View>
+          </ScrollView>
+        </ThemedView>
+      </KeyboardAvoidingView>
+
+      <RecentDrawer open={menuOpen} onClose={() => setMenuOpen(false)} />
+    </>
   );
 }
 
@@ -220,10 +304,9 @@ const styles = StyleSheet.create({
   // Keeps the box a readable width on a tablet or the web build.
   hero: { width: '100%', maxWidth: 720, alignSelf: 'center' },
 
+  headerButton: { paddingHorizontal: Spacing.two },
+
   heading: {
-    fontSize: 28,
-    lineHeight: 36,
-    fontWeight: '600',
     textAlign: 'center',
     marginBottom: Spacing.four,
   },
@@ -233,17 +316,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.two,
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 28,
+    borderRadius: Radius.prompt,
     paddingLeft: Spacing.three,
-    paddingRight: Spacing.one,
-    paddingVertical: Spacing.one,
-    minHeight: 56,
-    // Soft lift, the way the reference does it.
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 3,
+    paddingRight: Spacing.two,
+    paddingVertical: Spacing.two,
+    minHeight: TapTarget,
   },
   promptInput: {
     flex: 1,
@@ -252,12 +329,14 @@ const styles = StyleSheet.create({
   },
   micButton: { padding: Spacing.one },
   submitButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: Radius.prompt,
     alignItems: 'center',
     justifyContent: 'center',
   },
+
+  suggestions: { marginTop: Spacing.four },
 
   error: { marginTop: Spacing.three, alignItems: 'center', gap: Spacing.half },
   errorDetail: { textAlign: 'center' },

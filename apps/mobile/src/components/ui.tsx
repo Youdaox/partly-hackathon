@@ -13,9 +13,10 @@ import {
   type PressableProps,
   type ViewProps,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 
 import { ThemedText } from '@/components/themed-text';
-import { Spacing } from '@/constants/theme';
+import { Radius, Spacing, TapTarget } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
 // --- Button -----------------------------------------------------------------
@@ -172,7 +173,119 @@ export function Loading({ label }: { label?: string }) {
   );
 }
 
+// --- Match badge ------------------------------------------------------------
+
+/**
+ * The `95% match` badge from the report mockup.
+ *
+ * Three tiers, because a flat badge makes 95% and 38% look equally worth acting on:
+ * strong is filled, worth-a-look is outlined, weak is quiet grey.
+ */
+export function MatchBadge({ value }: { value: number }) {
+  const theme = useTheme();
+  const percent = Math.round(Math.max(0, Math.min(1, value)) * 100);
+  const tier = percent >= 75 ? 'strong' : percent >= 50 ? 'medium' : 'weak';
+
+  const style =
+    tier === 'strong'
+      ? { backgroundColor: theme.badgeFill, borderColor: 'transparent' }
+      : tier === 'medium'
+        ? { backgroundColor: 'transparent', borderColor: theme.accent }
+        : { backgroundColor: theme.backgroundSelected, borderColor: 'transparent' };
+
+  const color = tier === 'weak' ? theme.textSecondary : theme.badgeText;
+
+  return (
+    <View style={[styles.matchBadge, style]}>
+      <ThemedText type="small" style={[styles.matchBadgeText, { color }]}>
+        {percent}% match
+      </ThemedText>
+    </View>
+  );
+}
+
+// --- Numbered badge ---------------------------------------------------------
+
+/** The filled circle that ties a report row to its marker on the vehicle diagram. */
+export function NumberBadge({ n, muted = false }: { n: number; muted?: boolean }) {
+  const theme = useTheme();
+  return (
+    <View style={[styles.numberBadge, { backgroundColor: muted ? theme.textSecondary : theme.badgeText }]}>
+      <ThemedText type="small" style={[styles.numberBadgeText, { color: theme.accentText }]}>
+        {n}
+      </ThemedText>
+    </View>
+  );
+}
+
+// --- Section label ----------------------------------------------------------
+
+/** Letterspaced small caps, e.g. `AFFECTED ZONES`. */
+export function SectionLabel({ children }: { children: string }) {
+  const theme = useTheme();
+  return (
+    <ThemedText type="label" style={{ color: theme.iconMuted }}>
+      {children}
+    </ThemedText>
+  );
+}
+
+// --- Suggestion row ---------------------------------------------------------
+
+/** One of the tappable prompts under the entry box: an outline icon and a label. */
+export function SuggestionRow({
+  icon,
+  label,
+  onPress,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  onPress?: () => void;
+}) {
+  const theme = useTheme();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={onPress}
+      style={({ pressed }) => [styles.suggestionRow, { opacity: pressed ? 0.55 : 1 }]}
+    >
+      <Ionicons name={icon} size={21} color={theme.iconMuted} />
+      <ThemedText style={{ color: theme.textSecondary }}>{label}</ThemedText>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
+  matchBadge: {
+    paddingHorizontal: Spacing.two,
+    paddingVertical: Spacing.one,
+    borderRadius: Radius.chip,
+    borderWidth: 1,
+  },
+  matchBadgeText: {
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  numberBadge: {
+    width: 22,
+    height: 22,
+    borderRadius: Radius.round,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  numberBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 16,
+  },
+  suggestionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.three,
+    minHeight: TapTarget,
+    paddingHorizontal: Spacing.one,
+  },
   button: {
     paddingVertical: Spacing.three,
     paddingHorizontal: Spacing.four,

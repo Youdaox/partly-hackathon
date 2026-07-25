@@ -1,6 +1,10 @@
 /**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
+ * Design tokens, taken from the Partli mockups.
+ *
+ * The look is: warm light-grey page, near-black text with a blue cast, one slate-blue
+ * accent, hairline borders, and crop-mark ticks at the corners of framed content.
+ * Only the light palette is used today (see `hooks/use-theme.ts`); the dark values are
+ * kept in step so switching back to following the OS stays a one-line change.
  */
 
 import '@/global.css';
@@ -9,30 +13,42 @@ import { Platform, type TextStyle } from 'react-native';
 
 export const Colors = {
   light: {
-    text: '#000000',
-    background: '#ffffff',
-    backgroundElement: '#F0F0F3',
-    backgroundSelected: '#E0E1E6',
-    textSecondary: '#60646C',
-    border: '#D8DAE0',
-    accent: '#0B6BCB',
-    accentText: '#ffffff',
-    success: '#15803D',
-    danger: '#B91C1C',
-    warning: '#B45309',
+    text: '#191C1F',
+    background: '#F1F1EF',
+    /** Cards and the prompt box: a shade lighter than the page. */
+    backgroundElement: '#F7F7F5',
+    backgroundSelected: '#E4E6E4',
+    textSecondary: '#5F6570',
+    border: '#D6D8D9',
+    accent: '#5B7A9D',
+    accentText: '#FFFFFF',
+    /** Leading icons in the prompt box and suggestion rows. */
+    iconMuted: '#7C96B4',
+    /** The little `+` ticks that frame a card. */
+    cropMark: '#B4B8BB',
+    /** Filled match badges and numbered step badges. */
+    badgeFill: '#E4E9EF',
+    badgeText: '#44607F',
+    success: '#2F6B46',
+    danger: '#A93636',
+    warning: '#8A5A1A',
   },
   dark: {
-    text: '#ffffff',
-    background: '#000000',
-    backgroundElement: '#212225',
-    backgroundSelected: '#2E3135',
-    textSecondary: '#B0B4BA',
-    border: '#35383D',
-    accent: '#4C9AFF',
-    accentText: '#04121F',
-    success: '#4ADE80',
-    danger: '#F87171',
-    warning: '#FBBF24',
+    text: '#ECEDEE',
+    background: '#16181A',
+    backgroundElement: '#1F2225',
+    backgroundSelected: '#2C3033',
+    textSecondary: '#A0A6AE',
+    border: '#33383C',
+    accent: '#8FAECF',
+    accentText: '#10161C',
+    iconMuted: '#7C96B4',
+    cropMark: '#4A4F54',
+    badgeFill: '#25303C',
+    badgeText: '#A9C4DE',
+    success: '#6BC08C',
+    danger: '#E08585',
+    warning: '#D8A24A',
   },
 } as const;
 
@@ -71,6 +87,18 @@ export const Spacing = {
   four: 24,
   five: 32,
   six: 64,
+} as const;
+
+/** Minimum tap target. The spec assumes gloves, so nothing interactive goes below this. */
+export const TapTarget = 56;
+
+export const Radius = {
+  /** Match badges and small chips. */
+  chip: 6,
+  card: 14,
+  /** The prompt box and the drawer's New chat button. */
+  prompt: 4,
+  round: 999,
 } as const;
 
 export const BottomTabInset = Platform.select({ ios: 50, android: 80 }) ?? 0;

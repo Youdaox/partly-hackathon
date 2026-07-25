@@ -27,13 +27,17 @@ export default function RootLayout() {
       <Stack
         screenOptions={{
           headerShadowVisible: false,
-          headerTintColor: Colors.light.text,
+          headerTintColor: Colors.light.accent,
+          headerTitleStyle: { color: Colors.light.text, fontWeight: '700' },
           headerStyle: { backgroundColor: Colors.light.background },
+          contentStyle: { backgroundColor: Colors.light.background },
         }}
       >
+        {/* index and job/[id]/hidden set their own headers, so they can wire the
+            hamburger and the re-run action to screen state. */}
         <Stack.Screen name="index" options={{ title: 'Partli' }} />
         <Stack.Screen name="job/[id]/capture" options={{ title: 'Live capture' }} />
-        <Stack.Screen name="job/[id]/hidden" options={{ title: 'Hidden damage' }} />
+        <Stack.Screen name="job/[id]/hidden" options={{ title: 'Diagnosis' }} />
         <Stack.Screen name="job/[id]/send" options={{ title: 'Send to customer' }} />
       </Stack>
     </ThemeProvider>
