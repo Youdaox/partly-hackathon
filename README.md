@@ -1,7 +1,7 @@
-# First Look
+# Partli
 
 Automotive damage assessment. A repairer walks around a damaged car describing what they
-see; First Look matches each part to the OEM catalogue, predicts what else is likely
+see; Partli matches each part to the OEM catalogue, predicts what else is likely
 damaged **behind** the panels, and sends the customer a quote they can approve from their
 phone before the car is even stripped down.
 
@@ -66,8 +66,8 @@ a working default, so you can skip this initially.
 ### `packages/shared` has two entrypoints
 
 ```ts
-import type { Job, ApprovalOption } from '@first-look/shared';        // safe everywhere
-import { loadAssemblies, proximityGraph } from '@first-look/shared/dataset';  // Node only
+import type { Job, ApprovalOption } from '@partli/shared';        // safe everywhere
+import { loadAssemblies, proximityGraph } from '@partli/shared/dataset';  // Node only
 ```
 
 The root export is pure types and pricing helpers, so mobile and web can import it. The
@@ -78,15 +78,52 @@ them apart is what stops a React Native bundle trying to pull in `node:fs`.
 
 ## The demo flow
 
-1. **Vehicle select** (mobile) — pick a car. Creating a job seeds the visible damage list
-   from the shipped AI prediction, so you start with real damage.
-2. **Live capture** (mobile) — describe damage. Each utterance is resolved against the OEM
-   catalogue and appears in the list.
+1. **Entry screen** (mobile) — one prompt box and nothing else. Type or say a sentence
+   like *"yaris front right hit, bumper hanging off"* and you land in a live job: the
+   vehicle is resolved, the job created, the damage recorded. Creating a job also seeds
+   the visible damage list from the shipped AI prediction, so you start with real damage.
+
+   There is no vehicle picker, so the sentence has to name the car. If it doesn't, the
+   error names the vehicles that are available. The three with a catalogue are
+   **Toyota Yaris**, **Hyundai Santa Fe** and **Jaguar E-Pace**.
+2. **Live capture** (mobile) — keep describing damage. Each utterance is resolved against
+   the OEM catalogue and appears in the list.
 3. **Hidden damage** (mobile) — the oracle ranks parts likely damaged but not yet visible.
    Yes/No each one.
 4. **Send to customer** (mobile) — builds the quote and shows a QR code.
 5. **Approve** (web, `/approve/<jobId>`) — the customer picks OEM, aftermarket, or used.
 6. **Front desk** (web, `/dashboard`) — every job and where it's got to.
+
+---
+
+## Turning speech into parts
+
+Two pure functions in `packages/shared` do the work, both fully tested:
+
+**`matchVehicle(text, vehicles)`** pulls the car out of a sentence and hands back what's
+left as the damage description. A model hit outweighs a make hit, because three demo
+vehicles are Toyotas. It normalises spelling, so `santa fe`, `santafe`, `e-pace` and
+`epace` all land correctly, and it ignores the registration fragment in a slug so "16"
+can't pick the Yaris.
+
+**`searchParts(slug, query)`** resolves damage wording onto catalogue parts. Nobody says
+"Left Headlamp Assembly" — they say "headlamp smashed". So it matches on *words*, and
+weights each word by how rare it is across the catalogue (IDF). That matters more than it
+sounds: without it, "front" (in hundreds of part names) drowns out "bumper", and
+*"front right hit, bumper hanging off"* resolves to a footwell kick panel. On top of that:
+
+- an exact phrase match still wins outright, so typing a real part name is precise
+- parts that can't be ordered are pushed right down — they can't be quoted
+- fasteners and trim are demoted unless you actually said "clip" or "bracket", because
+  someone describing visible damage means the panel, not the clip holding it on
+- duplicate display names are collapsed (the catalogue has several ids per physical part)
+
+```
+"headlamp smashed"                    -> Left Headlamp Assembly
+"front right hit, bumper hanging off" -> Front Bumper Cover
+"right guard scraped"                 -> Right Front Guard Panel
+"completely destroyed"                -> nothing (no part named — better than a guess)
+```
 
 ---
 

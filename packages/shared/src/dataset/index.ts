@@ -1,5 +1,5 @@
 /**
- * @first-look/shared/dataset — Node-only dataset access.
+ * @partli/shared/dataset — Node-only dataset access.
  *
  * Reads the repo's `data/` folder. Import this from apps/api and from scripts, never
  * from mobile or web (it depends on `node:fs`).

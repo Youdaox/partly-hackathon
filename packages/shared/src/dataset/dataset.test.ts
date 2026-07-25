@@ -1,5 +1,5 @@
 /**
- * Verification against the real Yaris data. Run with `pnpm --filter @first-look/shared test`.
+ * Verification against the real Yaris data. Run with `pnpm --filter @partli/shared test`.
  *
  * These assert on facts confirmed by inspecting the shipped dataset, so they fail loudly
  * if the data is swapped for a different bundle.
@@ -204,4 +204,43 @@ test('searchParts resolves free text onto catalogue parts', () => {
   assert.ok(hits[0]!.assembly.display_name.toLowerCase().includes('front bumper cover'));
 
   assert.deepEqual(searchParts(YARIS, '   '), []);
+});
+
+test('searchParts understands how a repairer actually talks', () => {
+  // The whole premise of voice capture: nobody says "Left Headlamp Assembly", they
+  // say "headlamp smashed". Each of these must land on the right part.
+  const expectations: Array<[query: string, expected: string]> = [
+    ['headlamp smashed', 'Left Headlamp Assembly'],
+    ['front right hit, bumper hanging off', 'Front Bumper Cover'],
+    ['the front bumper is cracked', 'Front Bumper Cover'],
+    ['bonnet dented', 'Bonnet Panel'],
+    ['right guard scraped', 'Right Front Guard Panel'],
+    ['windscreen', 'Windscreen Glass'],
+  ];
+
+  for (const [query, expected] of expectations) {
+    const [top] = searchParts(YARIS, query, 3);
+    assert.ok(top, `"${query}" matched nothing`);
+    assert.equal(top.assembly.display_name, expected, `"${query}" resolved to the wrong part`);
+  }
+});
+
+test('searchParts prefers parts a shop can actually order', () => {
+  for (const query of ['front bumper cover', 'headlamp smashed', 'windscreen']) {
+    const [top] = searchParts(YARIS, query, 1);
+    assert.equal(top?.assembly.is_orderable, true, `"${query}" returned a non-orderable part`);
+  }
+});
+
+test('searchParts returns nothing when no part is named', () => {
+  // Pure damage vocabulary with no part noun must not guess.
+  assert.deepEqual(searchParts(YARIS, 'completely destroyed'), []);
+  assert.deepEqual(searchParts(YARIS, 'it is very badly damaged'), []);
+});
+
+test('searchParts does not repeat the same display name', () => {
+  // Several part ids share one physical part; a picker showing it three times is broken.
+  const hits = searchParts(YARIS, 'headlamp', 10);
+  const names = hits.map((h) => h.assembly.display_name);
+  assert.equal(new Set(names).size, names.length, `duplicate names: ${names.join(', ')}`);
 });
