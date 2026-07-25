@@ -62,10 +62,33 @@ def validate(kind: str, mime: str, size: int) -> None:
 
 def store(case: Case, kind: str, filename: str, data: bytes, mime: str) -> MediaAsset:
     validate(kind, mime, len(data))
+    # The storage key is namespaced and made safe; the asset keeps the name the
+    # device sent, because that is the one the repairer will recognise.
     safe = Path(filename).name or "upload"
     key = f"media/{case.id}/{cases.new_id('f')}_{safe}"
     storage.put(key, data)
-    return cases.add_media(case, kind=kind, storage_key=key, bytes=len(data))
+    return cases.add_media(
+        case,
+        kind=kind,
+        storage_key=key,
+        bytes=len(data),
+        filename=safe,
+        content_type=mime,
+    )
+
+
+def payload(asset: MediaAsset) -> dict:
+    """One stored file as the client sees it (spec 6.4)."""
+    return {
+        "media_id": asset.id,
+        "case_id": asset.case_id,
+        "kind": asset.kind,
+        "filename": asset.filename,
+        "content_type": asset.content_type,
+        "bytes": asset.bytes,
+        "uploaded_at": asset.uploaded_at,
+        "processed_at": asset.processed_at,
+    }
 
 
 async def keyframes(asset: MediaAsset, case: Case) -> list[bytes]:

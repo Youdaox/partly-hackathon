@@ -14,7 +14,9 @@
  */
 
 import Constants from 'expo-constants';
+import { Platform } from 'react-native';
 import type {
+  AllowedVehicle,
   Attribution,
   CaseDetail,
   CaseMessage,
@@ -30,16 +32,50 @@ import type {
 const PORT = 8080;
 
 function resolveBaseUrl(): { url: string; unreachableReason?: string } {
-  const configured = process.env.EXPO_PUBLIC_BACKEND_URL;
+  // Either spelling works; both appear in the setup notes.
+  const configured = process.env.EXPO_PUBLIC_API_URL ?? process.env.EXPO_PUBLIC_BACKEND_URL;
   if (configured) return { url: configured.replace(/\/$/, '') };
 
   // A phone cannot reach `localhost`, so reuse the LAN IP Metro is served from — that is
   // the machine running the backend.
   const hostUri = Constants.expoConfig?.hostUri ?? Constants.expoGoConfig?.debuggerHost;
   const host = hostUri?.split(':')[0];
-  if (!host) return { url: `http://localhost:${PORT}` };
+  if (!host) {
+    // No host to borrow. In a browser the page's own origin is the dev machine,
+    // so `localhost` is right there and wrong on a device — say which case this
+    // is rather than letting a phone fail with an address that means itself.
+    const origin =
+      typeof window !== 'undefined' && window.location?.hostname
+        ? window.location.hostname
+        : null;
+    if (origin && origin !== 'localhost' && origin !== '127.0.0.1') {
+      return { url: `http://${origin}:${PORT}` };
+    }
+    return {
+      url: `http://localhost:${PORT}`,
+      unreachableReason:
+        `Could not work out this machine's address, so it fell back to localhost. ` +
+        `That is the phone itself on a device — set EXPO_PUBLIC_API_URL in ` +
+        `apps/mobile/.env to your computer's LAN IP (e.g. http://192.168.1.20:${PORT}) ` +
+        `and restart Expo.`,
+    };
+  }
 
-  const isLanAddress = /^(\d{1,3}\.){3}\d{1,3}$/.test(host) || host === 'localhost';
+  // `localhost` means the device itself. In a browser on the dev machine that
+  // is the right answer; on a phone it is a dead end, and the failure needs to
+  // say so rather than suggest checking the wifi.
+  const isLoopback = host === 'localhost' || host === '127.0.0.1';
+  if (isLoopback && Platform.OS !== 'web') {
+    return {
+      url: `http://${host}:${PORT}`,
+      unreachableReason:
+        `Metro reported ${host}, which on a phone means the phone. Set ` +
+        `EXPO_PUBLIC_API_URL in apps/mobile/.env to this computer's LAN IP ` +
+        `(e.g. http://192.168.1.20:${PORT}) and restart Expo.`,
+    };
+  }
+
+  const isLanAddress = /^(\d{1,3}\.){3}\d{1,3}$/.test(host) || isLoopback;
   if (!isLanAddress) {
     return {
       url: `http://${host}:${PORT}`,
@@ -65,6 +101,7 @@ export const BACKEND_BASE_URL = `${resolved.url}/v1`;
 
 export type VehiclePayload = Vehicle;
 export type VehicleListItem = VehicleSummary;
+export type { AllowedVehicle };
 export type ClarifyingQuestion = Question;
 export type CaseReport = DamageReport;
 export type { Attribution, CaseDetail, CaseMessage, Offer, ReportLine };
@@ -150,6 +187,15 @@ async function postForm<T>(path: string, form: FormData, failureTitle: string): 
 
 export const backend = {
   listVehicles: () => request<{ vehicles: VehicleListItem[] }>('/vehicles'),
+
+  /**
+   * The regos a case may actually be opened against — the three that ship a
+   * full OEM catalogue. `/vehicles` lists everything the plate reader knows,
+   * most of which has nothing to predict over, so the entry screen offers
+   * these instead.
+   */
+  allowedVehicles: () =>
+    request<{ vehicles: AllowedVehicle[] }>('/vehicles/allowed'),
 
   /** Returns immediately; the vehicle resolves in the background. */
   registerVehicle: (rego: string) =>

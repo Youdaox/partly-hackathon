@@ -16,6 +16,8 @@ from app.catalogue import registry
 from app.main import create_app
 from app.services import vehicle_service
 from app.store import cases
+from app.tables import rego_map
+from app.tables.rego_map import REGO_MAP
 
 YARIS_REGO = "QMN16"
 NO_CATALOGUE_REGO = "NUE975"
@@ -86,16 +88,49 @@ def test_resolved_vehicle_exposes_its_configuration(client):
     assert body["status"] == "catalogue_ready"
     assert body["vin"] == "JTDKBAA3301006094"
     assert body["parts_indexed"] == 7009
+    # The connection count is what the capture page shows as proof the graph,
+    # not just the parts list, came out of the VIN.
+    assert body["edges_indexed"] > 10_000
     assert body["model_code"] == "MXPH10R-AHXNBQ"
     assert body["market"] == "AUSTRALIA"
 
 
-def test_no_catalogue_is_a_success_not_an_error(client):
-    """Spec 6.2: four vehicles are make-plate only."""
-    registered = client.post("/v1/vehicle/register", json={"rego": NO_CATALOGUE_REGO})
-    vehicle_id = registered.json()["vehicle_id"]
-    vehicle_service.resolve(cases.get_vehicle(vehicle_id))
-    body = client.get(f"/v1/vehicle/{vehicle_id}").json()
+def test_only_the_catalogued_regos_may_register(client):
+    """A hidden-damage report is a propagation over a parts catalogue, and nine
+    of the twelve plates have no catalogue to propagate over. They used to
+    register happily and produce an empty report, which reads as "nothing is
+    damaged" rather than "we cannot tell"."""
+    for rego in rego_map.ALLOWED_REGOS:
+        accepted = client.post("/v1/vehicle/register", json={"rego": rego})
+        assert accepted.status_code in (200, 202), rego
+        assert accepted.json()["vehicle_id"]
+
+    refused = [rego for rego in REGO_MAP if rego not in rego_map.ALLOWED_REGOS]
+    assert len(refused) == 9, "every uncatalogued plate must be covered"
+    for rego in refused:
+        response = client.post("/v1/vehicle/register", json={"rego": rego})
+        assert response.status_code == 422, rego
+        error = response.json()["error"]
+        assert error["code"] == "rego_not_allowed"
+        # The message has to name the way out, not just say no.
+        for allowed in rego_map.ALLOWED_REGOS:
+            assert allowed in error["message"], f"{rego} error omits {allowed}"
+
+
+def test_allowed_vehicles_endpoint_lists_the_three(client):
+    """So the client renders the picker without hardcoding the plates."""
+    body = client.get("/v1/vehicles/allowed").json()
+    assert [v["rego"] for v in body["vehicles"]] == list(rego_map.ALLOWED_REGOS)
+    for vehicle in body["vehicles"]:
+        assert {"rego", "make", "model", "year", "slug"} == set(vehicle)
+        assert vehicle["slug"] and vehicle["make"]
+
+
+def test_no_catalogue_resolution_is_still_a_success_not_an_error(client):
+    """Spec 6.2's make-plate path still behaves, even though registration no
+    longer exposes it — the resolver is what a real VIN service replaces."""
+    vehicle = vehicle_service.resolve(cases.create_vehicle(NO_CATALOGUE_REGO))
+    body = client.get(f"/v1/vehicle/{vehicle.id}").json()
     assert body["status"] == "no_catalogue"
     assert body["make"] == "Holden"
 
@@ -323,6 +358,92 @@ def test_upload_to_a_missing_case_404s(client):
         files={"files": ("a.jpg", b"\xff\xd8\xff", "image/jpeg")},
     )
     assert response.status_code == 404
+
+
+JPEG = b"\xff\xd8\xff\xe0\x00\x10JFIF" + b"\x00" * 64
+
+
+def _upload(client, case_id, *filenames):
+    return client.post(
+        "/v1/media/upload",
+        data={"case_id": case_id, "kind": "image"},
+        files=[("files", (name, JPEG, "image/jpeg")) for name in filenames],
+    )
+
+
+def test_uploaded_images_are_tracked_and_listable(client):
+    """Uploads are recorded, not analysed — but the repairer has to be able to
+    see exactly which files they sent, so every one keeps a stable media_id and
+    the name their device gave it."""
+    _, created = make_case(client)
+    case_id = created.json()["case_id"]
+
+    response = _upload(client, case_id, "front-left.jpg", "bumper-detail.jpg")
+    assert response.status_code == 202
+    assert len(response.json()["media_ids"]) == 2
+
+    listed = client.get(f"/v1/case/{case_id}/media").json()["media"]
+    assert len(listed) == 2
+    assert [asset["filename"] for asset in listed] == ["front-left.jpg", "bumper-detail.jpg"]
+
+    ids = [asset["media_id"] for asset in listed]
+    assert len(set(ids)) == 2, "media ids must be distinct"
+    assert set(ids) == set(response.json()["media_ids"]), "ids must be stable"
+
+    for asset in listed:
+        assert asset["kind"] == "image"
+        assert asset["content_type"] == "image/jpeg"
+        assert asset["bytes"] == len(JPEG)
+        assert asset["uploaded_at"] > 0
+
+
+def test_uploads_accumulate_across_requests(client):
+    _, created = make_case(client)
+    case_id = created.json()["case_id"]
+    _upload(client, case_id, "one.jpg")
+    _upload(client, case_id, "two.jpg", "three.jpg")
+
+    listed = client.get(f"/v1/case/{case_id}/media").json()["media"]
+    assert [asset["filename"] for asset in listed] == ["one.jpg", "two.jpg", "three.jpg"]
+
+
+def test_the_case_and_report_carry_the_uploaded_media(client):
+    _, created = make_case(client)
+    case_id = created.json()["case_id"]
+    _upload(client, case_id, "quarter-panel.jpg")
+
+    case = client.get(f"/v1/case/{case_id}").json()
+    assert [asset["filename"] for asset in case["media"]] == ["quarter-panel.jpg"]
+
+    report = client.get(f"/v1/prediction/results/{case_id}").json()
+    assert [asset["filename"] for asset in report["media"]] == ["quarter-panel.jpg"]
+
+
+def test_media_listing_for_a_missing_case_404s(client):
+    assert client.get("/v1/case/case_nope/media").status_code == 404
+
+
+def test_uploaded_bytes_come_back_for_a_thumbnail(client):
+    _, created = make_case(client)
+    case_id = created.json()["case_id"]
+    media_id = _upload(client, case_id, "front-left.jpg").json()["media_ids"][0]
+
+    response = client.get(f"/v1/media/{media_id}")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/jpeg"
+    assert response.content == JPEG
+
+
+def test_unknown_media_404s(client):
+    assert client.get("/v1/media/med_nope").status_code == 404
+
+
+def test_too_many_files_in_one_request_is_rejected(client):
+    _, created = make_case(client)
+    case_id = created.json()["case_id"]
+    response = _upload(client, case_id, *[f"{i}.jpg" for i in range(11)])
+    assert response.status_code == 413
+    assert response.json()["error"]["code"] == "media_too_large"
 
 
 # --- diagrams ---------------------------------------------------------------

@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends
 from app.api.deps import require_case
 from app.api.errors import ApiError
 from app.schemas.requests import ConfirmRequest, PredictionRunRequest
-from app.services import case_service
+from app.services import case_service, media_service
 from app.store import cases
 from app.store.cases import Case
 
@@ -36,6 +36,13 @@ async def results(case: Case = Depends(require_case)) -> dict:
         if payload is None:
             raise ApiError("prediction_unavailable", "no Interpreter output for this vehicle")
         return payload
+
+    # The report is a cached snapshot of a propagation, but uploads do not
+    # cause one — they are recorded, not analysed. Refreshing the list here
+    # costs a store read and keeps it from lagging behind what was uploaded.
+    case.last_report["media"] = [
+        media_service.payload(asset) for asset in cases.uploaded_media(case)
+    ]
     return case.last_report
 
 

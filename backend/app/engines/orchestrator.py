@@ -59,11 +59,17 @@ def run(
         inspections = counterfactual.rank_inspections(
             candidates, local_edges, evidence, predictions, history
         )
+        # The question is picked out of the inspection ranking, not recomputed:
+        # `rank_inspections` has already scored exactly what a question needs
+        # to know — how undecided each part is and how much settling it moves.
         question = counterfactual.next_question(
-            candidates, local_edges, evidence, predictions, history, conflicts, asked
+            candidates, local_edges, evidence, predictions, history, conflicts, asked,
+            inspections,
         )
 
-    sections = buckets.split(predictions, by_id, inspections)
+    # `split` needs the edges to fold fasteners under the part they belong to.
+    # It gets the already-narrowed list, not the catalogue's ~21,000.
+    sections = buckets.split(predictions, by_id, inspections, local_edges)
     elapsed = int((time.perf_counter() - started) * 1000)
 
     return Report(

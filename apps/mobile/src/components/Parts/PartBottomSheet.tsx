@@ -65,9 +65,17 @@ export function PartBottomSheet({ region, visible, onClose, onViewDiagram }: Par
           <ThemedText type="default">{region.description}</ThemedText>
         </Section>
 
-        <Section label="Confidence">
-          <ConfidenceBar value={region.confidence} />
-        </Section>
+        {/* Only predictions carry a likelihood. A visible part was detected in
+            the photos, so it is reported as detected, not as a probability. */}
+        {region.damageType === 'invisible' ? (
+          <Section label="Likelihood">
+            <ConfidenceBar value={region.confidence} />
+          </Section>
+        ) : (
+          <Section label="Status">
+            <ThemedText type="default">Detected in the photos by Partly</ThemedText>
+          </Section>
+        )}
 
         <Section label="AI Insight">
           <View style={[styles.insightCard, { backgroundColor: theme.backgroundElement }]}>

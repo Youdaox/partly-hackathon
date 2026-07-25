@@ -76,6 +76,7 @@ def resolve(vehicle: Vehicle) -> Vehicle:
         return vehicle
 
     vehicle.parts_indexed = catalogue.parts_indexed
+    vehicle.edges_indexed = len(catalogue.edges)
     vehicle.status = "catalogue_ready"
     return vehicle
 

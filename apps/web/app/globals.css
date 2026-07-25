@@ -91,3 +91,69 @@
     font-family: var(--font-sans), system-ui, sans-serif;
   }
 }
+
+/*
+ * Motion for the capture flow.
+ *
+ * The two beats a demo audience has to see happening — looking a VIN up, and
+ * the interpreter reading the photos — are both waits. Animating them is what
+ * makes the wait legible rather than dead. Everything here is a plain keyframe
+ * so no animation library is pulled in for four rules.
+ *
+ * All of it collapses under `prefers-reduced-motion`: the content still
+ * arrives, it just arrives immediately.
+ */
+
+/* One screen replacing another. */
+@keyframes screen-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.995);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* A line of the reveal arriving. Staggered by inline animation-delay. */
+@keyframes flow-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* The scanline that sweeps the thumbnails while the interpreter "reads" them. */
+@keyframes scan {
+  0% {
+    transform: translateY(-120%);
+  }
+  100% {
+    transform: translateY(420%);
+  }
+}
+
+.animate-screen-in {
+  animation: screen-in 0.5s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+
+.animate-flow-in {
+  animation: flow-in 0.45s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+
+.animate-scan {
+  animation: scan 1.7s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-screen-in,
+  .animate-flow-in,
+  .animate-scan {
+    animation: none;
+  }
+}

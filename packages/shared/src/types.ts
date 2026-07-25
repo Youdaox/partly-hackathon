@@ -74,6 +74,8 @@ export interface Vehicle {
   market: string | null;
   steering: string | null;
   parts_indexed: number;
+  /** Part-to-part connections built for this vehicle; the prediction walks these. */
+  edges_indexed?: number;
   resolved_ms: number | null;
 }
 
@@ -169,10 +171,23 @@ export interface ReportLine {
   part_id: PartId;
   part_number: string | null;
   name: string;
-  /** Probability this part needs replacing, 0..1. */
+  /**
+   * Probability this part needs replacing, 0..1.
+   *
+   * Only meaningful for parts the engine *inferred*. A line in `visible` was
+   * observed by Partly's interpreter or confirmed by the repairer, so its
+   * number is 0.95-1.0 by construction and says nothing — the UI rule is
+   * observed = no number, predicted = number.
+   */
   p: number;
   qty: number;
   reason?: string;
+  /**
+   * Fasteners, seals and sub-components that come with this line. A repairer
+   * orders a bumper cover and its clips, never nine clips, so consumables are
+   * nested here rather than given order slots of their own.
+   */
+  hardware?: ReportLine[];
   diagram_id?: DiagramId;
   /** False when the diagram exists but its image was not shipped — do not fetch. */
   diagram_available?: boolean;
@@ -207,6 +222,29 @@ export interface InspectFirstItem {
   informs: number;
 }
 
+/** One uploaded file. Recorded and listed only — uploads never drive the prediction. */
+export interface MediaAsset {
+  media_id: string;
+  case_id: string;
+  kind: 'image' | 'video' | 'audio' | 'frame';
+  /** The name the repairer's device sent, so they recognise what they added. */
+  filename: string | null;
+  content_type: string | null;
+  bytes: number;
+  /** Unix seconds. */
+  uploaded_at: number;
+  processed_at: number | null;
+}
+
+/** One row of `GET /v1/vehicles/allowed` — the regos a case may be opened against. */
+export interface AllowedVehicle {
+  rego: Rego;
+  make: string;
+  model: string;
+  year: number | null;
+  slug: VehicleSlug;
+}
+
 export interface DamageReport {
   case_id: string;
   status: CaseStatus;
@@ -214,6 +252,10 @@ export interface DamageReport {
   impact: Impact;
   question: Question | null;
   sections: Record<Bucket, ReportLine[]>;
+  /** Fasteners with no parent in the report, collapsed into one group. */
+  consumables?: ReportLine[];
+  /** What the repairer uploaded. Listed, never analysed. */
+  media?: MediaAsset[];
   /** Top accessible inspections, capped at 3. */
   inspect_first?: InspectFirstItem[];
   hidden_count?: number;

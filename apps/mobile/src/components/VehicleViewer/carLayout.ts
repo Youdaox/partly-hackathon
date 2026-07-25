@@ -46,25 +46,50 @@ export const PART_LAYOUT: PartLayout[] = [
     position: [-0.85, 0.5, 1.1],
     color: CAR_BODY_COLOR,
   },
+  // The impact is front-RIGHT, so the guard that lights up has to be the right
+  // one. Mirrors LeftFender across x.
   {
-    meshName: 'RadiatorSupport',
-    size: [1.3, 0.5, 0.15],
-    position: [0, 0.5, 1.75],
-    color: '#5B6470',
+    meshName: 'RightFender',
+    size: [0.15, 0.6, 1.2],
+    position: [0.85, 0.5, 1.1],
+    color: CAR_BODY_COLOR,
+  },
+  // --- behind the cover, in the order the load travels --------------------
+  {
+    meshName: 'EnergyAbsorber',
+    size: [1.5, 0.25, 0.12],
+    position: [0, 0.28, 1.92],
+    color: '#6B7280',
     hiddenByDefault: true,
   },
   {
-    meshName: 'CrashBar',
-    size: [1.5, 0.2, 0.15],
-    position: [0, 0.3, 1.8],
+    meshName: 'BumperReinforcement',
+    size: [1.5, 0.2, 0.12],
+    position: [0, 0.3, 1.82],
     color: '#4A525E',
     hiddenByDefault: true,
   },
   {
-    meshName: 'Sensors',
-    size: [0.12, 0.08, 0.08],
-    position: [0, 0.28, 2.12],
-    color: '#2E333B',
+    meshName: 'RadiatorSupport',
+    size: [1.3, 0.5, 0.15],
+    position: [0, 0.5, 1.7],
+    color: '#5B6470',
+    hiddenByDefault: true,
+  },
+  // Right-side only: it is the right headlamp that was hit, and this bracket
+  // is the part the prediction reaches from it.
+  {
+    meshName: 'RightHeadlampBracket',
+    size: [0.3, 0.16, 0.12],
+    position: [0.78, 0.45, 1.74],
+    color: '#3F4753',
+    hiddenByDefault: true,
+  },
+  {
+    meshName: 'CrashBox',
+    size: [0.22, 0.22, 0.35],
+    position: [0.62, 0.3, 1.6],
+    color: '#39414C',
     hiddenByDefault: true,
   },
 ];
