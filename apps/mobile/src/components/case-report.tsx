@@ -11,6 +11,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 
 import { Framed } from '@/components/framed';
@@ -352,6 +353,7 @@ export function CaseReportView({
 
   const flagged = groups.reduce((total, group) => total + group.lines.length, 0);
   const active = groups.find((group) => group.key === openSection) ?? groups[0];
+  const confirmedView = active.key === 'confirmed';
 
   return (
     <ScrollView contentContainerStyle={styles.list} keyboardShouldPersistTaps="handled">
@@ -397,7 +399,9 @@ export function CaseReportView({
                 {
                   borderColor: selected ? theme.badgeText : theme.border,
                   backgroundColor: selected ? theme.badgeText : theme.backgroundElement,
-                  opacity: pressed ? 0.8 : 1,
+                  // A press dips the button rather than fading it. Opacity on a filled
+                  // navy surface reads as the button breaking; scale reads as a press.
+                  transform: [{ scale: pressed ? 0.97 : 1 }],
                 },
               ]}
             >
@@ -494,11 +498,18 @@ export function CaseReportView({
             const dropped = change != null && change.to < change.from;
 
             return (
-              <View
+              // Rows fade in on a filter swap and when the model adds one, so a list that
+              // rearranged under your thumb is visibly a change rather than a redraw.
+              // Staggered slightly, capped so a twelve-part list does not crawl.
+              <Animated.View
                 key={line.part_id}
+                entering={FadeInDown.duration(180).delay(Math.min(index, 6) * 25)}
                 style={[
                   styles.groupRow,
-                  index > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.border },
+                  index > 0 && {
+                    borderTopWidth: StyleSheet.hairlineWidth,
+                    borderTopColor: theme.border,
+                  },
                   (change != null || isNew) && { backgroundColor: theme.badgeFill },
                 ]}
               >
@@ -518,7 +529,23 @@ export function CaseReportView({
                       </ThemedText>
                     ) : null}
                   </ThemedText>
-                  <MatchBadge value={line.p} />
+
+                  {/* A settled part shows no probability: it is not a prediction any more,
+                      it is a fact. All it needs is a way out if the camera got it wrong. */}
+                  {confirmedView ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`Remove ${line.name} \u2014 not actually damaged`}
+                      disabled={busyId === line.part_id}
+                      onPress={() => onConfirm(line.part_id, false)}
+                      hitSlop={8}
+                      style={({ pressed }) => [styles.rowRemove, { opacity: pressed ? 0.5 : 1 }]}
+                    >
+                      <Ionicons name="close" size={18} color={theme.textSecondary} />
+                    </Pressable>
+                  ) : (
+                    <MatchBadge value={line.p} />
+                  )}
                 </View>
 
                 {/* The move itself, in points, so it is legible from a metre away. */}
@@ -542,12 +569,14 @@ export function CaseReportView({
                   </View>
                 ) : null}
 
-                <CompactConfirm
-                  line={line}
-                  busy={busyId === line.part_id}
-                  onConfirm={onConfirm}
-                />
-              </View>
+                {confirmedView ? null : (
+                  <CompactConfirm
+                    line={line}
+                    busy={busyId === line.part_id}
+                    onConfirm={onConfirm}
+                  />
+                )}
+              </Animated.View>
             );
           })
         )}
@@ -743,6 +772,13 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   groupRowHead: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  rowRemove: {
+    width: 32,
+    height: 32,
+    borderRadius: Radius.round,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
   miniRow: { flexDirection: 'row', gap: Spacing.two, marginTop: Spacing.one },
   miniButton: {
