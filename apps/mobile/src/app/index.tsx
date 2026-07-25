@@ -23,7 +23,6 @@ import {
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { matchVehicle, type VehicleSummary } from '@partli/shared';
 
 import { Framed } from '@/components/framed';
 import { RecentDrawer } from '@/components/recent-drawer';
@@ -34,7 +33,9 @@ import { NoFocusRing, Radius, Spacing, TapTarget } from '@/constants/theme';
 import { toErrorInfo, useAsyncData } from '@/hooks/use-async-data';
 import { useTheme } from '@/hooks/use-theme';
 import { useVoiceCapture } from '@/hooks/use-voice-capture';
-import { api } from '@/lib/api';
+import { backend } from '@/lib/backend';
+import { rememberCase } from '@/lib/recent-cases';
+import { resolveRego, type RegoMatch } from '@/lib/rego';
 
 /** Pre-filled starter, so the demo does not depend on remembering the phrasing. */
 const EXAMPLE = 'yaris front right hit, bumper hanging off';
@@ -45,52 +46,53 @@ export default function EntryScreen() {
   const voice = useVoiceCapture();
 
   // Loaded in the background — the input renders immediately either way.
-  const vehicles = useAsyncData(() => api.listVehicles());
+  const vehicles = useAsyncData(async () => (await backend.listVehicles()).vehicles);
 
   const [draft, setDraft] = useState('');
   const [starting, setStarting] = useState(false);
-  // VIN resolution takes a second or two, so say what is happening rather than spin.
-  const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<{ title: string; detail?: string } | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
 
   const startable = (vehicles.data ?? []).filter((v) => v.has_catalogue);
 
   const begin = useCallback(
-    async (vehicle: VehicleSummary, damageText: string) => {
+    async (match: RegoMatch) => {
       setStarting(true);
       setError(null);
 
-      const said = damageText.trim();
+      const said = match.remainder.trim();
 
       try {
-        // Registering the plate kicks off the VIN lookup; the case cannot open
-        // until it lands, so `startCase` does that waiting for us. The case is
-        // seeded from the shipped Interpreter output, so it opens populated.
-        setStatus('Looking up the plate…');
-        const { caseId } = await api.startCase(vehicle.rego, (vehicleStatus) => {
-          setStatus(
-            vehicleStatus === 'catalogue_ready'
-              ? 'Loading the parts catalogue…'
-              : 'Looking up the plate…',
-          );
+        // Track A: rego → VIN → catalogue, resolving in the background. Returns at once,
+        // so nothing here waits on it — the diagnosis screen shows its progress.
+        const vehicle = await backend.registerVehicle(match.rego);
+        const created = await backend.createCase(vehicle.vehicle_id);
+
+        // Track B: the repairer's own words become the first evidence on the case. The
+        // backend recomputes the whole prediction from it.
+        if (said) await backend.sendMessage(created.case_id, said);
+
+        // The drawer's list lives on the device, since the backend cannot enumerate cases.
+        rememberCase({
+          caseId: created.case_id,
+          vehicleId: vehicle.vehicle_id,
+          label: `${match.vehicle.make} ${match.vehicle.model} · ${match.rego}`,
+          said: said || undefined,
         });
 
-        // Whatever they said about the damage is just a message on the case —
-        // the same path a voice transcript takes.
-        if (said) await api.sendMessage(caseId, said);
-
-        // Straight to the diagnosis: the report is already computed on arrival.
         router.push({
-          pathname: '/job/[id]/hidden',
-          params: { id: caseId, ...(said ? { said } : {}) },
+          pathname: '/case/[id]',
+          params: {
+            id: created.case_id,
+            vehicleId: vehicle.vehicle_id,
+            ...(said ? { said } : {}),
+          },
         });
         setDraft('');
       } catch (err) {
         setError(toErrorInfo(err));
       } finally {
         setStarting(false);
-        setStatus(null);
       }
     },
     [router],
@@ -105,22 +107,22 @@ export default function EntryScreen() {
       return;
     }
 
-    const match = matchVehicle(text, startable, { requireCatalogue: true });
+    const match = resolveRego(text, vehicles.data ?? []);
     if (!match) {
       // With no picker on screen, the error has to say what is actually available.
       setError({
         title: 'Which vehicle is that?',
         detail: startable.length
-          ? `Name it in your sentence, or read the plate. Available: ${startable
+          ? `Name it or give the rego. Available: ${startable
               .map((v) => `${v.make} ${v.model} (${v.rego})`)
               .join(', ')}.`
-          : 'No vehicles with a parts catalogue were found. Is the API running?',
+          : 'No vehicles with a parts catalogue were found. Is the backend running on 8080?',
       });
       return;
     }
 
-    void begin(match.vehicle, match.remainder);
-  }, [draft, starting, vehicles.loading, startable, begin]);
+    void begin(match);
+  }, [draft, starting, vehicles.loading, vehicles.data, startable, begin]);
 
   const toggleRecording = useCallback(async () => {
     if (voice.isRecording) {
@@ -138,8 +140,8 @@ export default function EntryScreen() {
       detail: startable.length
         ? `${startable
             .map((v) => `${v.make} ${v.model} (${v.rego})`)
-            .join(', ')}. Name one, or read out its plate.`
-        : 'Is the API running?',
+            .join(', ')}. Name one, or give its rego.`
+        : 'Is the backend running on port 8080?',
     });
   }, [startable]);
 
@@ -275,14 +277,6 @@ export default function EntryScreen() {
                   onPress={showVehicles}
                 />
               </View>
-
-              {status ? (
-                <View style={styles.error}>
-                  <ThemedText type="small" themeColor="textSecondary">
-                    {status}
-                  </ThemedText>
-                </View>
-              ) : null}
 
               {/* The only thing that ever sits under the starters. */}
               {error ? (

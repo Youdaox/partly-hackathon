@@ -391,6 +391,12 @@ export default function DiagnosisScreen() {
 
           <View style={[styles.footer, { borderTopColor: theme.border }]}>
             <Button
+              title="View 3D inspection"
+              variant="secondary"
+              onPress={() => router.push(`/job/${caseId}/inspection`)}
+              fullWidth
+            />
+            <Button
               title="Send to customer"
               onPress={() => router.push(`/job/${caseId}/send`)}
               disabled={visible.length === 0 && order.length === 0}

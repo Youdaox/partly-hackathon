@@ -36,8 +36,11 @@ export default function RootLayout() {
         {/* index and job/[id]/hidden set their own headers, so they can wire the
             hamburger and the re-run action to screen state. */}
         <Stack.Screen name="index" options={{ title: 'Partli' }} />
+        <Stack.Screen name="case/[id]" options={{ title: 'Diagnosis' }} />
+        {/* Legacy: the jobs API flow on apps/api. Superseded by case/[id]. */}
         <Stack.Screen name="job/[id]/capture" options={{ title: 'Live capture' }} />
         <Stack.Screen name="job/[id]/hidden" options={{ title: 'Diagnosis' }} />
+        <Stack.Screen name="job/[id]/inspection" options={{ title: 'AI damage inspection' }} />
         <Stack.Screen name="job/[id]/send" options={{ title: 'Send to customer' }} />
       </Stack>
     </ThemeProvider>

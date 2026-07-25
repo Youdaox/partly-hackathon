@@ -41,3 +41,6 @@ backend/.cache/
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# pip install -e build metadata
+backend/*.egg-info/

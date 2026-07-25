@@ -1,54 +1,57 @@
 /**
- * The RECENT drawer: New chat, then every job the API knows about, most recent first.
+ * The RECENT drawer: New chat, then the cases opened on this device, newest first.
  *
- * Slides over the entry screen from the left and dims what is behind it. Loads its list
- * each time it opens so a job started on this device is there without a manual refresh.
+ * Backed by `lib/recent-cases`, not the server — the prediction backend exposes no
+ * list-cases endpoint, so there is nothing to ask. See that module for what it costs.
  */
 
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { relativeTime, type CaseListItem, type CaseStatus } from '@partli/shared';
 
 import { ThemedText } from '@/components/themed-text';
-import { ErrorNotice, Loading, SectionLabel } from '@/components/ui';
+import { SectionLabel } from '@/components/ui';
 import { Radius, Spacing, TapTarget } from '@/constants/theme';
-import { useAsyncData } from '@/hooks/use-async-data';
 import { useTheme } from '@/hooks/use-theme';
-import { api } from '@/lib/api';
+import { listRecentCases, subscribe, type RecentCase } from '@/lib/recent-cases';
 
-/** What the case has got to, in the repairer's words rather than the schema's. */
-const STATUS_LABEL: Record<CaseStatus, string> = {
-  open: 'just started',
-  analysing: 'analysing',
-  ready: 'hidden damage ranked',
-  ordered: 'parts ordered',
-  sent_to_customer: 'sent to customer',
-  approved: 'approved',
-  closed: 'closed',
-};
+/** `Today, 2:14 PM` · `Yesterday` · `Mon` · `12 Jul`, matching the mockup. */
+function relativeTime(iso: string): string {
+  const then = new Date(iso);
+  if (Number.isNaN(then.getTime())) return '';
 
-function vehicleName(vehicle: CaseListItem['vehicle'], fallback: string): string {
-  const named = [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(' ');
-  return named || vehicle.rego || fallback;
+  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.round((startOfDay(new Date()) - startOfDay(then)) / 86_400_000);
+
+  if (days <= 0) {
+    return `Today, ${then.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
+  }
+  if (days === 1) return 'Yesterday';
+  if (days < 7) return then.toLocaleDateString(undefined, { weekday: 'short' });
+  return then.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
 }
 
 export function RecentDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
   const theme = useTheme();
   const router = useRouter();
-  const jobs = useAsyncData(() => api.listCases(), []);
+  const [cases, setCases] = useState<RecentCase[]>(listRecentCases);
 
-  useEffect(() => {
-    if (open) void jobs.reload();
-    // Reloading is keyed on `open` alone; `jobs` is a new object every render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  // `rememberCase` and `labelCase` both notify, so the list stays current without the
+  // drawer having to re-read when it opens.
+  useEffect(() => subscribe(() => setCases(listRecentCases())), []);
 
-  const openJob = useCallback(
-    (item: CaseListItem) => {
+  const openCase = useCallback(
+    (entry: RecentCase) => {
       onClose();
-      router.push({ pathname: '/job/[id]/hidden', params: { id: item.case_id } });
+      router.push({
+        pathname: '/case/[id]',
+        params: {
+          id: entry.caseId,
+          vehicleId: entry.vehicleId,
+          ...(entry.said ? { said: entry.said } : {}),
+        },
+      });
     },
     [onClose, router],
   );
@@ -61,7 +64,12 @@ export function RecentDrawer({ open, onClose }: { open: boolean; onClose: () => 
   return (
     <Modal visible={open} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.overlay}>
-        <View style={[styles.panel, { backgroundColor: theme.background, borderRightColor: theme.border }]}>
+        <View
+          style={[
+            styles.panel,
+            { backgroundColor: theme.background, borderRightColor: theme.border },
+          ]}
+        >
           <ScrollView contentContainerStyle={styles.panelContent}>
             <Pressable
               accessibilityRole="button"
@@ -79,32 +87,35 @@ export function RecentDrawer({ open, onClose }: { open: boolean; onClose: () => 
               <SectionLabel>RECENT</SectionLabel>
             </View>
 
-            {jobs.loading ? <Loading /> : null}
-            {jobs.error ? <ErrorNotice title={jobs.error.title} detail={jobs.error.detail} /> : null}
-
-            {jobs.data?.length === 0 ? (
+            {cases.length === 0 ? (
               <ThemedText type="small" themeColor="textSecondary">
-                No jobs yet. Describe a car to start one.
+                No cases yet. Describe a car to start one.
               </ThemedText>
             ) : null}
 
-            {(jobs.data ?? []).map((job) => (
+            {cases.map((entry) => (
               <Pressable
-                key={job.case_id}
+                key={entry.caseId}
                 accessibilityRole="button"
-                onPress={() => openJob(job)}
+                onPress={() => openCase(entry)}
                 style={({ pressed }) => [
                   styles.row,
                   { borderBottomColor: theme.border, opacity: pressed ? 0.6 : 1 },
                 ]}
               >
-                <Ionicons name="car-outline" size={20} color={theme.iconMuted} style={styles.rowIcon} />
+                <Ionicons
+                  name="car-outline"
+                  size={20}
+                  color={theme.iconMuted}
+                  style={styles.rowIcon}
+                />
                 <View style={styles.rowText}>
                   <ThemedText numberOfLines={1}>
-                    {vehicleName(job.vehicle, job.case_id)} — {STATUS_LABEL[job.status]}
+                    {entry.label}
+                    {entry.said ? ` — ${entry.said}` : ''}
                   </ThemedText>
                   <ThemedText type="small" themeColor="textSecondary">
-                    {relativeTime(job.created_at)}
+                    {relativeTime(entry.openedAt)}
                   </ThemedText>
                 </View>
               </Pressable>
@@ -126,11 +137,7 @@ export function RecentDrawer({ open, onClose }: { open: boolean; onClose: () => 
 
 const styles = StyleSheet.create({
   overlay: { flex: 1, flexDirection: 'row' },
-  panel: {
-    width: '78%',
-    maxWidth: 380,
-    borderRightWidth: StyleSheet.hairlineWidth,
-  },
+  panel: { width: '78%', maxWidth: 380, borderRightWidth: StyleSheet.hairlineWidth },
   panelContent: {
     paddingTop: Spacing.six,
     paddingHorizontal: Spacing.three,
