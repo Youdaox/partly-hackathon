@@ -153,22 +153,7 @@ function useCascade(report: CaseReport | null) {
   return { changes, departed, arrived };
 }
 
-type SectionKey = 'confirmed' | 'unconfirmed' | 'predicted';
-
-/** The marker beside a group name: settled, waiting on you, or the model's guess. */
-function StatusDot({ kind }: { kind: 'solid' | 'hollow' | 'muted' }) {
-  const theme = useTheme();
-  return (
-    <View
-      style={[
-        styles.dot,
-        kind === 'solid' && { backgroundColor: theme.accent },
-        kind === 'hollow' && { borderWidth: 1.5, borderColor: theme.accent },
-        kind === 'muted' && { backgroundColor: theme.textSecondary },
-      ]}
-    />
-  );
-}
+type SectionKey = 'confirmed' | 'predicted';
 
 /**
  * ✓ / ✗ sized down.
@@ -279,9 +264,7 @@ export function CaseReportView({
    * Which group is expanded. Hidden damage on arrival: it is what the product is for, and
    * the only group with a decision attached to every row.
    */
-  const [openSection, setOpenSection] = useState<SectionKey | null>('confirmed');
-  const toggleSection = (key: SectionKey) =>
-    setOpenSection((current) => (current === key ? null : key));
+  const [openSection, setOpenSection] = useState<SectionKey>('confirmed');
 
   const resolving = vehicle?.status === 'resolving';
 
@@ -333,32 +316,22 @@ export function CaseReportView({
   const impact = impactLine(report);
 
   /**
-   * Regrouped by who decided, not by which bucket the engine used.
+   * Two filters, split by who decided.
    *
-   *   Confirmed    established damage — the camera saw it, or you ticked it
-   *   Unconfirmed  waiting on your call
-   *   AI-predicted the model inferred it and nobody has touched it
+   *   Confirmed     established — the camera saw it, or you ticked it
+   *   AI-predicted  the model's, and you have not ruled on it yet
    *
-   * A part moves up a group as you tick it, which is the point of the grouping: the screen
-   * shows how much of the job is settled rather than which engine bucket a row came out of.
-   *
-   * Note that a part ticked *not* damaged does not land in Unconfirmed — the backend drops
-   * it from the report entirely — so "unconfirmed" means undecided, not ruled out.
+   * There is no third "unconfirmed" group: a part ticked ✗ is dropped from the report by
+   * the backend entirely, so undecided parts from the check bucket sit under AI-predicted
+   * with everything else awaiting a decision. Two buttons, and every part in one of them.
    */
   const ticked = (line: ReportLine) => line.confirmed === true;
   const undecided = (line: ReportLine) => line.confirmed == null;
 
-  const groups: {
-    key: SectionKey;
-    title: string;
-    dot: 'solid' | 'hollow' | 'muted';
-    empty: string;
-    lines: ReportLine[];
-  }[] = [
+  const groups: { key: SectionKey; title: string; empty: string; lines: ReportLine[] }[] = [
     {
       key: 'confirmed',
       title: 'Confirmed',
-      dot: 'solid',
       empty: 'Nothing confirmed yet.',
       lines: [
         ...report.sections.visible,
@@ -367,22 +340,18 @@ export function CaseReportView({
       ],
     },
     {
-      key: 'unconfirmed',
-      title: 'Unconfirmed',
-      dot: 'hollow',
-      empty: 'Nothing waiting on you.',
-      lines: report.sections.check.filter(undecided),
-    },
-    {
       key: 'predicted',
       title: 'AI-predicted',
-      dot: 'muted',
       empty: 'Nothing predicted yet.',
-      lines: report.sections.order.filter(undecided),
+      lines: [
+        ...report.sections.order.filter(undecided),
+        ...report.sections.check.filter(undecided),
+      ],
     },
   ];
 
   const flagged = groups.reduce((total, group) => total + group.lines.length, 0);
+  const active = groups.find((group) => group.key === openSection) ?? groups[0];
 
   return (
     <ScrollView contentContainerStyle={styles.list} keyboardShouldPersistTaps="handled">
@@ -408,31 +377,49 @@ export function CaseReportView({
             {impact}
           </ThemedText>
         ) : null}
-        <View style={styles.flaggedChips}>
-          {groups.map((group) => (
-            <View
+      </Framed>
+
+      {/* Two filters, not three collapsing sections. The count leads because it is what
+          the repairer is scanning for; the selected one fills so the choice is obvious
+          from arm's length. */}
+      <View style={styles.filters}>
+        {groups.map((group) => {
+          const selected = group.key === active.key;
+          return (
+            <Pressable
               key={group.key}
-              style={[
-                styles.flaggedChip,
+              accessibilityRole="tab"
+              accessibilityState={{ selected }}
+              accessibilityLabel={`${group.title}, ${group.lines.length} parts`}
+              onPress={() => setOpenSection(group.key)}
+              style={({ pressed }) => [
+                styles.filter,
                 {
-                  borderColor: group.key === 'unconfirmed' ? theme.accent : 'transparent',
-                  backgroundColor:
-                    group.key === 'unconfirmed' ? 'transparent' : theme.backgroundElement,
+                  borderColor: selected ? theme.badgeText : theme.border,
+                  backgroundColor: selected ? theme.badgeText : theme.backgroundElement,
+                  opacity: pressed ? 0.8 : 1,
                 },
               ]}
             >
               <ThemedText
-                type="small"
-                style={{
-                  color: group.key === 'unconfirmed' ? theme.accent : theme.textSecondary,
-                }}
+                type="heading"
+                style={[
+                  styles.filterCount,
+                  { color: selected ? theme.accentText : theme.text },
+                ]}
               >
-                {group.lines.length} {group.title.toLowerCase()}
+                {group.lines.length}
               </ThemedText>
-            </View>
-          ))}
-        </View>
-      </Framed>
+              <ThemedText
+                type="smallBold"
+                style={{ color: selected ? theme.accentText : theme.textSecondary }}
+              >
+                {group.title}
+              </ThemedText>
+            </Pressable>
+          );
+        })}
+      </View>
 
       {/* --- The one clarifying question ------------------------------------- */}
       {report.question ? (
@@ -485,125 +472,86 @@ export function CaseReportView({
         </View>
       ) : null}
 
-      {/* --- The three groups. Rows live inside the card, not under it. ------- */}
-      {groups.map((group) => {
-        const open = openSection === group.key;
-        return (
-          <View
-            key={group.key}
-            style={[
-              styles.groupCard,
-              { borderColor: theme.border, backgroundColor: theme.backgroundElement },
-            ]}
-          >
-            <Pressable
-              accessibilityRole="button"
-              accessibilityState={{ expanded: open }}
-              accessibilityLabel={`${group.title}, ${group.lines.length} parts`}
-              onPress={() => toggleSection(group.key)}
-              style={({ pressed }) => [styles.groupHead, { opacity: pressed ? 0.6 : 1 }]}
-            >
-              <StatusDot kind={group.dot} />
-              <ThemedText type="rowTitle" style={styles.grow}>
-                {group.title}
-              </ThemedText>
-              <ThemedText type="small" themeColor="textSecondary">
-                {group.lines.length}
-              </ThemedText>
-              <Ionicons
-                name={open ? 'chevron-up' : 'chevron-down'}
-                size={17}
-                color={theme.textSecondary}
-              />
-            </Pressable>
-
-            {open
-              ? group.lines.map((line) => {
-                  // What the last answer or tick did to this row. Tinting it is the whole
-                  // proof that one answer moves the model, not just the row you touched.
-                  const change = cascade.changes.get(line.part_id);
-                  const isNew = cascade.arrived.has(line.part_id);
-                  const dropped = change != null && change.to < change.from;
-
-                  return (
-                    <View
-                      key={line.part_id}
-                      style={[
-                        styles.groupRow,
-                        { borderTopColor: theme.border },
-                        (change != null || isNew) && { backgroundColor: theme.badgeFill },
-                      ]}
-                    >
-                      <View style={styles.groupRowHead}>
-                        {isNew ? (
-                          <View style={[styles.newBadge, { backgroundColor: theme.accent }]}>
-                            <ThemedText type="small" style={{ color: theme.accentText }}>
-                              new
-                            </ThemedText>
-                          </View>
-                        ) : null}
-                        <ThemedText style={styles.grow} numberOfLines={2}>
-                          {line.name}
-                          {line.qty > 1 ? (
-                            <ThemedText type="smallBold" style={{ color: theme.textSecondary }}>
-                              {'  '}×{line.qty}
-                            </ThemedText>
-                          ) : null}
-                        </ThemedText>
-                        <MatchBadge value={line.p} />
-                      </View>
-
-                      {/* The move itself, in points, so it is legible from a metre away. */}
-                      {change != null ? (
-                        <View style={styles.deltaRow}>
-                          <Ionicons
-                            name={dropped ? 'arrow-down' : 'arrow-up'}
-                            size={13}
-                            color={dropped ? theme.textSecondary : theme.danger}
-                          />
-                          <ThemedText
-                            type="smallBold"
-                            style={{ color: dropped ? theme.textSecondary : theme.danger }}
-                          >
-                            {dropped ? '' : '+'}
-                            {Math.round((change.to - change.from) * 100)} points
-                          </ThemedText>
-                          <ThemedText type="small" themeColor="textSecondary">
-                            was {Math.round(change.from * 100)}%
-                          </ThemedText>
-                        </View>
-                      ) : null}
-
-                      {line.reason ? (
-                        <ThemedText type="small" themeColor="textSecondary">
-                          {line.reason}
-                        </ThemedText>
-                      ) : null}
-
-                      <CompactConfirm
-                        line={line}
-                        busy={busyId === line.part_id}
-                        onConfirm={onConfirm}
-                      />
-                    </View>
-                  );
-                })
-              : null}
-
-            {open && group.lines.length === 0 ? (
-              <View style={[styles.groupRow, { borderTopColor: theme.border }]}>
-                <ThemedText type="small" themeColor="textSecondary">
-                  {group.key === 'confirmed'
-                    ? 'Nothing confirmed yet.'
-                    : group.key === 'unconfirmed'
-                      ? 'Nothing waiting on you.'
-                      : 'Nothing predicted yet.'}
-                </ThemedText>
-              </View>
-            ) : null}
+      {/* --- The selected filter's parts, in one card. ----------------------- */}
+      <View
+        style={[
+          styles.groupCard,
+          { borderColor: theme.border, backgroundColor: theme.backgroundElement },
+        ]}
+      >
+        {active.lines.length === 0 ? (
+          <View style={styles.groupRow}>
+            <ThemedText type="small" themeColor="textSecondary">
+              {active.empty}
+            </ThemedText>
           </View>
-        );
-      })}
+        ) : (
+          active.lines.map((line, index) => {
+            // What the last answer or tick did to this row. Tinting it is the whole
+            // proof that one answer moves the model, not just the row you touched.
+            const change = cascade.changes.get(line.part_id);
+            const isNew = cascade.arrived.has(line.part_id);
+            const dropped = change != null && change.to < change.from;
+
+            return (
+              <View
+                key={line.part_id}
+                style={[
+                  styles.groupRow,
+                  index > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.border },
+                  (change != null || isNew) && { backgroundColor: theme.badgeFill },
+                ]}
+              >
+                <View style={styles.groupRowHead}>
+                  {isNew ? (
+                    <View style={[styles.newBadge, { backgroundColor: theme.accent }]}>
+                      <ThemedText type="small" style={{ color: theme.accentText }}>
+                        new
+                      </ThemedText>
+                    </View>
+                  ) : null}
+                  <ThemedText style={styles.grow} numberOfLines={2}>
+                    {line.name}
+                    {line.qty > 1 ? (
+                      <ThemedText type="smallBold" style={{ color: theme.textSecondary }}>
+                        {'  '}\u00d7{line.qty}
+                      </ThemedText>
+                    ) : null}
+                  </ThemedText>
+                  <MatchBadge value={line.p} />
+                </View>
+
+                {/* The move itself, in points, so it is legible from a metre away. */}
+                {change != null ? (
+                  <View style={styles.deltaRow}>
+                    <Ionicons
+                      name={dropped ? 'arrow-down' : 'arrow-up'}
+                      size={13}
+                      color={dropped ? theme.textSecondary : theme.danger}
+                    />
+                    <ThemedText
+                      type="smallBold"
+                      style={{ color: dropped ? theme.textSecondary : theme.danger }}
+                    >
+                      {dropped ? '' : '+'}
+                      {Math.round((change.to - change.from) * 100)} points
+                    </ThemedText>
+                    <ThemedText type="small" themeColor="textSecondary">
+                      was {Math.round(change.from * 100)}%
+                    </ThemedText>
+                  </View>
+                ) : null}
+
+                <CompactConfirm
+                  line={line}
+                  busy={busyId === line.part_id}
+                  onConfirm={onConfirm}
+                />
+              </View>
+            );
+          })
+        )}
+      </View>
     </ScrollView>
   );
 }
@@ -746,7 +694,17 @@ const styles = StyleSheet.create({
 
   grow: { flex: 1 },
 
-  dot: { width: 9, height: 9, borderRadius: Radius.round },
+  // Two filter buttons, equal width. The count is the headline; the label sits under it.
+  filters: { flexDirection: 'row', gap: Spacing.two },
+  filter: {
+    flex: 1,
+    gap: Spacing.one,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.card,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.three,
+  },
+  filterCount: { fontSize: 30, lineHeight: 34 },
 
   // The one summarising block on the screen, so it keeps the crop marks.
   flagged: { gap: Spacing.two, alignItems: 'center' },
