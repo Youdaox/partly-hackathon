@@ -24,7 +24,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Button, Card, EmptyState, ErrorNotice, Loading, Pill } from '@/components/ui';
-import { Spacing } from '@/constants/theme';
+import { NoFocusRing, Spacing } from '@/constants/theme';
 import { toErrorInfo, useAsyncData } from '@/hooks/use-async-data';
 import { useTheme } from '@/hooks/use-theme';
 import { useVoiceCapture } from '@/hooks/use-voice-capture';
@@ -39,7 +39,12 @@ interface TranscriptLine {
 }
 
 export default function CaptureScreen() {
-  const { id: jobId } = useLocalSearchParams<{ id: string }>();
+  // `draft` is set when the entry screen could not match what was typed to a part —
+  // it arrives here so the repairer can reword it rather than retype it.
+  const { id: jobId, draft: carriedDraft } = useLocalSearchParams<{
+    id: string;
+    draft?: string;
+  }>();
   const router = useRouter();
   const theme = useTheme();
   const voice = useVoiceCapture();
@@ -47,7 +52,7 @@ export default function CaptureScreen() {
   const job = useAsyncData(() => api.getJob(jobId), [jobId]);
 
   const [transcript, setTranscript] = useState<TranscriptLine[]>([]);
-  const [draft, setDraft] = useState('');
+  const [draft, setDraft] = useState(carriedDraft ?? '');
   const [submitting, setSubmitting] = useState(false);
   const [actionError, setActionError] = useState<{ title: string; detail?: string } | null>(null);
 
@@ -213,6 +218,7 @@ export default function CaptureScreen() {
                   backgroundColor: theme.backgroundElement,
                   borderColor: theme.border,
                 },
+                NoFocusRing,
               ]}
             />
             <Button

@@ -1,16 +1,16 @@
 {
   "expo": {
-    "name": "First Look",
-    "slug": "first-look",
+    "name": "Partli",
+    "slug": "partli",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "firstlook",
-    "userInterfaceStyle": "automatic",
+    "scheme": "partli",
+    "userInterfaceStyle": "light",
     "ios": {
       "icon": "./assets/expo.icon",
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "First Look records your walkaround so damaged parts can be captured as you describe them."
+        "NSMicrophoneUsageDescription": "Partli records your walkaround so damaged parts can be captured as you describe them."
       }
     },
     "android": {
@@ -27,7 +27,8 @@
     },
     "web": {
       "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/favicon.png",
+      "backgroundColor": "#ffffff"
     },
     "plugins": [
       "expo-router",
@@ -44,6 +45,7 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "backgroundColor": "#ffffff"
   }
 }

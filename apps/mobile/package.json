@@ -1,10 +1,11 @@
 {
-  "name": "@first-look/mobile",
+  "name": "@partli/mobile",
   "main": "expo-router/entry",
   "version": "1.0.0",
   "dependencies": {
     "@expo/ui": "~57.0.7",
-    "@first-look/shared": "workspace:*",
+    "@expo/vector-icons": "^15.1.1",
+    "@partli/shared": "workspace:*",
     "expo": "~57.0.8",
     "expo-audio": "~57.0.3",
     "expo-constants": "~57.0.7",
