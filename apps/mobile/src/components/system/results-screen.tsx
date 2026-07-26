@@ -27,6 +27,7 @@ import { diagramImageUrl } from '@/lib/backend';
 import { regionsFromReport } from '@/lib/damage-regions';
 import type { CaseReport, ReportLine, VehiclePayload } from '@/lib/backend';
 import type { ErrorInfo } from '@/hooks/use-case';
+import { useCascade } from '@/hooks/use-cascade';
 import { InspectionPanel } from './inspection-panel';
 import { FooterBar, PageTitle, Rule, ScreenHeader, VehicleLine } from './primitives';
 import { PartCard, QuestionCard, SegmentedTabs } from './report-parts';
@@ -99,6 +100,9 @@ export function ResultsScreen({
   const [openDiagram, setOpenDiagram] = useState<string | null>(null);
 
   const regions = useMemo(() => regionsFromReport(report), [report]);
+
+  /** What the last answer or tick moved, so the screen can point at it. */
+  const cascade = useCascade(report);
 
   /**
    * part_id -> the mesh it sits on.
@@ -217,6 +221,23 @@ export function ResultsScreen({
           />
         ) : null}
 
+        {/* The totals, because the rows that moved may be below the fold — and because
+            answering the side question mostly swaps parts rather than moving them, which
+            no per-row marker can show on its own. */}
+        {cascade.active ? (
+          <View style={styles.cascade}>
+            <ThemedText style={styles.cascadeText}>
+              {[
+                cascade.arrived.size > 0 ? `${cascade.arrived.size} new` : null,
+                cascade.changes.size > 0 ? `${cascade.changes.size} re-ranked` : null,
+                cascade.departed > 0 ? `${cascade.departed} no longer likely` : null,
+              ]
+                .filter(Boolean)
+                .join('  ·  ')}
+            </ThemedText>
+          </View>
+        ) : null}
+
         {active.length === 0 ? (
           <ThemedText style={styles.empty}>
             {tab === 'confirmed' ? 'Nothing confirmed yet.' : 'Nothing else predicted.'}
@@ -240,6 +261,10 @@ export function ResultsScreen({
                   : undefined
               }
               selected={mesh != null && mesh === selectedMesh}
+              // A moved or newly arrived row says so, and says what it moved from.
+              moved={cascade.changes.has(line.part_id) || cascade.arrived.has(line.part_id)}
+              changedFrom={cascade.changes.get(line.part_id)?.from}
+              isNew={cascade.arrived.has(line.part_id)}
               onConfirm={tab === 'confirmed' ? undefined : () => onConfirm(line.part_id, true)}
               // `false` is "I looked, it is fine" — the engine clamps it to zero and drops
               // the part from the report entirely. Available on both tabs: a confirmed row
@@ -285,6 +310,14 @@ const styles = StyleSheet.create({
 
   scroll: { flex: 1, minHeight: 0 },
   scrollBody: { paddingTop: 14, paddingHorizontal: Intake.gutter, gap: 12, paddingBottom: 8 },
+  cascade: {
+    backgroundColor: Intake.accentPale,
+    borderLeftWidth: 2,
+    borderLeftColor: Intake.accent,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  cascadeText: { fontFamily: Faces.sansMedium, fontSize: 12.5, color: Intake.accentPaleText },
   empty: { fontFamily: Faces.sans, fontSize: 13, color: Intake.mutedLabel },
 
 });

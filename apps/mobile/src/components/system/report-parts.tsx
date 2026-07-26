@@ -104,11 +104,15 @@ export interface PartCardProps {
   /** Tints the card when the last answer moved this row. */
   moved?: boolean;
   /**
-   * Select the part, which lights its mesh on the 3D model above.
+   * What this part's probability was before the last answer, when it moved.
    *
-   * The card is the whole hit target rather than a separate chevron: a repairer reading the
-   * list wants to see where a name sits on the car, and that should not cost aim.
+   * Printed as "was 61% ↑ +27" beside the number. A tinted row says *something* changed; the
+   * repairer still has to be told what it changed from, or the tint is decoration.
    */
+  changedFrom?: number;
+  /** This part was not in the previous report — the answer brought it in. */
+  isNew?: boolean;
+  /** Light this part's mesh on the 3D model above. Omitted when it has no mesh. */
   onPress?: () => void;
   /** True when this part's mesh is the one currently lit on the model. */
   selected?: boolean;
@@ -133,26 +137,22 @@ export function PartCard({
   onRemove,
   busy,
   moved,
+  changedFrom,
+  isNew,
   onPress,
   selected,
   diagramUrl,
   diagramOpen,
   onToggleDiagram,
 }: PartCardProps) {
-  // A plain View when there is nothing to select, so a card without a mesh does not
-  // advertise a tap that does nothing.
-  const Shell = onPress ? Pressable : View;
+  const delta = changedFrom != null && p != null ? Math.round((p - changedFrom) * 100) : null;
 
   return (
-    <Shell
-      {...(onPress
-        ? {
-            accessibilityRole: 'button' as const,
-            accessibilityState: { selected: !!selected },
-            accessibilityLabel: `${name} — show on the model`,
-            onPress,
-          }
-        : {})}
+    // Deliberately not pressable. Making the whole card the hit target turned it into a
+    // <button> on web, and the confirm/dismiss/diagram controls inside it are buttons too —
+    // nested buttons are invalid HTML and the inner ones stop firing. Selection is its own
+    // control below instead, which also stops a tap on "Confirm damage" doing two things.
+    <View
       style={[
         styles.card,
         moved ? { backgroundColor: Intake.accentPale, borderColor: Intake.accentPaleBorder } : null,
@@ -183,14 +183,46 @@ export function PartCard({
       ) : null}
 
       <View style={styles.cardBody}>
-        <ThemedText style={styles.cardName} numberOfLines={2}>
-          {name}
-        </ThemedText>
+        <View style={styles.nameRow}>
+          <ThemedText style={styles.cardName} numberOfLines={2}>
+            {name}
+          </ThemedText>
+          {isNew ? (
+            <View style={styles.newBadge}>
+              <ThemedText style={styles.newBadgeText}>NEW</ThemedText>
+            </View>
+          ) : null}
+        </View>
+
+        {/* Where it moved from, and by how much. */}
+        {delta != null && delta !== 0 ? (
+          <ThemedText style={styles.delta}>
+            {`was ${Math.round((changedFrom ?? 0) * 100)}%  ${delta > 0 ? '↑' : '↓'} ${
+              delta > 0 ? '+' : ''
+            }${delta} points`}
+          </ThemedText>
+        ) : null}
 
         {confirmed ? (
           <>
             <ThemedText style={styles.cardMeta}>Confirmed at the car</ThemedText>
             <ThemedText style={styles.verified}>✓ verified</ThemedText>
+            {onPress ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ selected: !!selected }}
+                accessibilityLabel={
+                  selected ? `Hide ${name} on the model` : `Show ${name} on the model`
+                }
+                onPress={onPress}
+                hitSlop={10}
+                style={({ pressed }) => [styles.confirmLink, { opacity: pressed ? 0.6 : 1 }]}
+              >
+                <ThemedText style={styles.confirmText}>
+                  {selected ? 'Hide on model' : 'Show on model'}
+                </ThemedText>
+              </Pressable>
+            ) : null}
           </>
         ) : (
           <>
@@ -230,6 +262,22 @@ export function PartCard({
                   ]}
                 >
                   <ThemedText style={styles.dismissText}>Not damaged</ThemedText>
+                </Pressable>
+              ) : null}
+              {onPress ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: !!selected }}
+                  accessibilityLabel={
+                    selected ? `Hide ${name} on the model` : `Show ${name} on the model`
+                  }
+                  onPress={onPress}
+                  hitSlop={10}
+                  style={({ pressed }) => [styles.confirmLink, { opacity: pressed ? 0.6 : 1 }]}
+                >
+                  <ThemedText style={styles.dismissText}>
+                    {selected ? 'Hide on model' : 'Show on model'}
+                  </ThemedText>
                 </Pressable>
               ) : null}
             </View>
@@ -273,7 +321,7 @@ export function PartCard({
           </>
         ) : null}
       </View>
-    </Shell>
+    </View>
   );
 }
 
@@ -368,11 +416,22 @@ const styles = StyleSheet.create({
   // Capped so a long label does not stretch the tap target the width of the card.
   // Selected: the accent edge, matching the marker lit on the model above.
   cardSelected: { borderColor: Intake.accent, backgroundColor: Intake.accentPale },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  newBadge: {
+    backgroundColor: Intake.accent,
+    borderRadius: Round.answerChip,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+  },
+  newBadgeText: { fontFamily: Faces.sansMedium, fontSize: 9.5, letterSpacing: 0.6, color: '#FFFFFF' },
+  // The one place a number is allowed next to the headline number: it says what that
+  // headline used to be.
+  delta: { fontFamily: Faces.sansMedium, fontSize: 12, color: Intake.accentPaleText },
   confirmLink: { minHeight: 28, maxWidth: 160, justifyContent: 'center' },
   confirmText: { fontFamily: Faces.sansMedium, fontSize: 12.5, color: Intake.accent },
   // Both actions on one line; the accent stays on the one that adds to the order, so
   // "Not damaged" reads as the quieter of the two.
-  actions: { flexDirection: 'row', alignItems: 'center', gap: 18 },
+  actions: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 18 },
   dismissText: { fontFamily: Faces.sansMedium, fontSize: 12.5, color: Intake.secondary },
   remove: {
     width: 34,
