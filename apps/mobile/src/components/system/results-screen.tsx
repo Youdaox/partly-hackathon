@@ -287,8 +287,9 @@ export function ResultsScreen({
         )}
       </ScrollView>
 
+      {/* No label: the action already says what it does, and "Full parts list" beside it
+          read as a second button that went nowhere. */}
       <FooterBar
-        label="Full parts list"
         action={`Review & confirm list (${groups.predicted.length}) →`}
         onPress={onReviewAndConfirm}
       />

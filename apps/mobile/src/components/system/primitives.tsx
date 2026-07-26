@@ -265,19 +265,24 @@ export function IconChip({
 
 // --- Footer -----------------------------------------------------------------
 
-/** The ruled bar that closes a screen: a quiet label and an accent action. */
+/**
+ * The ruled bar that closes a screen: a quiet label and an accent action.
+ *
+ * The label is optional. Where the action already names what it does, a label beside it is
+ * just a second title for the same thing — so the action right-aligns on its own instead.
+ */
 export function FooterBar({
   label,
   action,
   onPress,
 }: {
-  label: string;
+  label?: string;
   action: string;
   onPress: () => void;
 }) {
   return (
-    <View style={styles.footer}>
-      <ThemedText style={styles.footerLabel}>{label}</ThemedText>
+    <View style={[styles.footer, label ? null : styles.footerActionOnly]}>
+      {label ? <ThemedText style={styles.footerLabel}>{label}</ThemedText> : null}
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={action}
@@ -383,6 +388,8 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: Intake.ruleFooter,
   },
+  // With nothing on the left, `space-between` would strand the action there.
+  footerActionOnly: { justifyContent: 'flex-end' },
   footerLabel: { fontFamily: Faces.sansMedium, fontSize: 13, color: Intake.body },
   footerAction: { minHeight: 44, justifyContent: 'center' },
   footerActionText: { fontFamily: Faces.sansMedium, fontSize: 13, color: Intake.accent },
