@@ -375,7 +375,9 @@ export function DamageCapture({
         <View style={styles.contextGroup}>
           {vehicleRow}
           <Rule />
-          <PageTitle size={40}>Add the damage to start the analysis.</PageTitle>
+          <PageTitle size={40} style={styles.centred}>
+              Add the damage to start the analysis.
+            </PageTitle>
           <ThemedText style={styles.body}>
             Photos read best, but a sentence about what happened is enough to begin.
           </ThemedText>
@@ -488,6 +490,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     color: Intake.ink,
   },
+  centred: { textAlign: 'center', alignSelf: 'center' },
   body: {
     fontFamily: Faces.sans,
     fontSize: 14,

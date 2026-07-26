@@ -388,8 +388,9 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: Intake.ruleFooter,
   },
-  // With nothing on the left, `space-between` would strand the action there.
-  footerActionOnly: { justifyContent: 'flex-end' },
+  // With nothing on the left, `space-between` would strand the action there. Centred
+  // rather than right-aligned: on its own it is the screen's next step, not a trailing link.
+  footerActionOnly: { justifyContent: 'center' },
   footerLabel: { fontFamily: Faces.sansMedium, fontSize: 13, color: Intake.body },
   footerAction: { minHeight: 44, justifyContent: 'center' },
   footerActionText: { fontFamily: Faces.sansMedium, fontSize: 13, color: Intake.accent },

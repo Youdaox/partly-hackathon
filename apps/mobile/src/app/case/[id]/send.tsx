@@ -170,7 +170,7 @@ export default function SendToCustomerScreen() {
 
       <ScrollView contentContainerStyle={styles.main} keyboardShouldPersistTaps="handled">
         <View style={styles.titleGroup}>
-          <PageTitle size={40}>Send to the customer</PageTitle>
+          <PageTitle size={40} style={styles.centredText}>Send to the customer</PageTitle>
           <ThemedText style={styles.body}>
             Email them the link and they can approve from their own phone.
           </ThemedText>
@@ -258,7 +258,9 @@ const styles = StyleSheet.create({
   retry: { marginTop: 16 },
 
   main: { paddingTop: 52, paddingHorizontal: Intake.gutter, gap: 34, paddingBottom: 24 },
-  titleGroup: { gap: 14 },
+  titleGroup: { gap: 14, alignItems: 'center' },
+  // Width-capped copy needs the block centred as well as the text.
+  centredText: { textAlign: 'center', alignSelf: 'center' },
   body: { fontFamily: Faces.sans, fontSize: 14, lineHeight: 22, color: Intake.body, maxWidth: 300 },
 
   quote: { gap: 14, borderTopWidth: 1, borderTopColor: Intake.ruleFooter, paddingTop: 18 },
@@ -275,7 +277,7 @@ const styles = StyleSheet.create({
     color: Intake.mutedLabel,
   },
   quoteBody: { fontFamily: Faces.sans, fontSize: 13, lineHeight: 19.5, color: Intake.body },
-  seeParts: { minHeight: 44, justifyContent: 'center' },
+  seeParts: { minHeight: 44, justifyContent: 'center', alignSelf: 'center' },
   seePartsText: { fontFamily: Faces.sansMedium, fontSize: 13, color: Intake.accent },
 
   partRow: {
