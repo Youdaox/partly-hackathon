@@ -242,7 +242,10 @@ const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: Intake.page },
   pending: { padding: Intake.gutter, gap: 16 },
 
-  context: { paddingTop: 16, paddingHorizontal: Intake.gutter, gap: 13 },
+  // Tight to the header. Losing the duplicate nav bar gave this screen its
+  // height back, and the car is what should get it — the panel is the part a
+  // repairer reads at a glance, and it was sitting below the fold.
+  context: { paddingTop: 10, paddingHorizontal: Intake.gutter, gap: 11 },
   titleRow: { flexDirection: 'row', alignItems: 'baseline', gap: 12 },
   title: { flex: 1 },
   descriptor: { fontFamily: Faces.sans, fontSize: 12, color: Intake.mutedLabel },
