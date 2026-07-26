@@ -167,11 +167,10 @@ export default function HomeScreen() {
     }
   }, [voice, kase]);
 
-  const title =
-    step !== 'rego' && kase.vehicle
-      ? [kase.vehicle.year, kase.vehicle.make, kase.vehicle.model].filter(Boolean).join(' ') ||
-        kase.vehicle.rego
-      : 'Partli';
+  // The report already names the vehicle in its own masthead, so repeating it in
+  // the nav bar was the same words twice and crowded the back arrow. The header
+  // stays empty once a job is under way; only the entry screen is branded.
+  const title = step === 'rego' ? 'Partli' : '';
 
   return (
     <>

@@ -66,6 +66,9 @@ export function GlbCarModel({
 
   const handleBodyPointerDown = (event: ThreeEvent<PointerEvent>) => {
     event.stopPropagation();
+    // Every exterior part is a valid tap target, not just currently-highlighted
+    // ones — this is a locate-a-part tool first (see this screen's own doc
+    // comment), so a tap has to be able to land on any part of the car.
     const meshName = nearestExteriorMesh(
       [event.point.x, event.point.y, event.point.z],
       exteriorMeshNames(),

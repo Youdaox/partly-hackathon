@@ -3,6 +3,10 @@
 /*
  * shadcn/ui design tokens, Tailwind v4 style.
  *
+ * The accent is the indigo the repairer app uses (#5B4FE8 = oklch(0.53 0.22 285)),
+ * so the approval page a customer opens looks like it came from the same product
+ * as the app that sent it.
+ *
  * Tailwind v4 has no tailwind.config.js — tokens are declared here and exposed to
  * utility classes through `@theme inline`. To add a token: define it in :root and
  * in the dark blocks, then map it in @theme to get `bg-*`/`text-*`/`border-*`.
@@ -15,7 +19,7 @@
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.52 0.18 256);
+  --primary: oklch(0.53 0.22 285);
   --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
@@ -27,7 +31,7 @@
   --success-foreground: oklch(0.985 0 0);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
-  --ring: oklch(0.52 0.18 256);
+  --ring: oklch(0.53 0.22 285);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -36,7 +40,7 @@
     --foreground: oklch(0.985 0 0);
     --card: oklch(0.205 0 0);
     --card-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.65 0.17 256);
+    --primary: oklch(0.68 0.17 285);
     --primary-foreground: oklch(0.145 0 0);
     --secondary: oklch(0.269 0 0);
     --secondary-foreground: oklch(0.985 0 0);
@@ -48,7 +52,7 @@
     --success-foreground: oklch(0.145 0 0);
     --border: oklch(1 0 0 / 12%);
     --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.65 0.17 256);
+    --ring: oklch(0.68 0.17 285);
   }
 }
 

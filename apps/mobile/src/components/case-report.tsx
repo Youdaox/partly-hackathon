@@ -19,7 +19,6 @@ import { ThemedText } from '@/components/themed-text';
 import {
   ErrorNotice,
   Loading,
-  MatchBadge,
   SectionLabel,
 } from '@/components/ui';
 import { Radius, Spacing, TapTarget } from '@/constants/theme';
@@ -155,77 +154,6 @@ function useCascade(report: CaseReport | null) {
 }
 
 type SectionKey = 'confirmed' | 'predicted';
-
-/**
- * ✓ / ✗ sized down.
- *
- * The full-width pair is right when a card holds one decision, but these sit inside a
- * grouped list where every row has them — at full size the buttons become the list.
- */
-function CompactConfirm({
-  line,
-  busy,
-  onConfirm,
-}: {
-  line: ReportLine;
-  busy: boolean;
-  onConfirm: (partId: string, damaged: boolean) => void;
-}) {
-  const theme = useTheme();
-
-  if (line.confirmed != null) {
-    return (
-      <View style={styles.miniReviewed}>
-        <Ionicons
-          name={line.confirmed ? 'checkmark-circle' : 'close-circle-outline'}
-          size={15}
-          color={line.confirmed ? theme.success : theme.textSecondary}
-        />
-        <ThemedText
-          type="small"
-          style={{ color: line.confirmed ? theme.success : theme.textSecondary }}
-        >
-          {line.confirmed ? 'Confirmed damaged' : 'Ruled out'}
-        </ThemedText>
-      </View>
-    );
-  }
-
-  return (
-    <View style={styles.miniRow}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`Confirm ${line.name} is damaged`}
-        disabled={busy}
-        onPress={() => onConfirm(line.part_id, true)}
-        style={({ pressed }) => [
-          styles.miniButton,
-          { borderColor: theme.success, opacity: pressed ? 0.6 : 1 },
-        ]}
-      >
-        <Ionicons name="checkmark" size={14} color={theme.success} />
-        <ThemedText type="small" style={{ color: theme.success }}>
-          Damaged
-        </ThemedText>
-      </Pressable>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`Rule out ${line.name}`}
-        disabled={busy}
-        onPress={() => onConfirm(line.part_id, false)}
-        style={({ pressed }) => [
-          styles.miniButton,
-          { borderColor: theme.border, opacity: pressed ? 0.6 : 1 },
-        ]}
-      >
-        <Ionicons name="close" size={14} color={theme.textSecondary} />
-        <ThemedText type="small" themeColor="textSecondary">
-          Not damaged
-        </ThemedText>
-      </Pressable>
-    </View>
-  );
-}
 
 export interface CaseReportViewProps {
   report: CaseReport | null;
@@ -397,8 +325,8 @@ export function CaseReportView({
               style={({ pressed }) => [
                 styles.filter,
                 {
-                  borderColor: selected ? theme.badgeText : theme.border,
-                  backgroundColor: selected ? theme.badgeText : theme.backgroundElement,
+                  borderColor: selected ? theme.accent : 'transparent',
+                  backgroundColor: selected ? theme.accent : theme.badgeFill,
                   // A press dips the button rather than fading it. Opacity on a filled
                   // navy surface reads as the button breaking; scale reads as a press.
                   transform: [{ scale: pressed ? 0.97 : 1 }],
@@ -406,20 +334,28 @@ export function CaseReportView({
               ]}
             >
               <ThemedText
-                type="heading"
-                style={[
-                  styles.filterCount,
-                  { color: selected ? theme.accentText : theme.text },
-                ]}
-              >
-                {group.lines.length}
-              </ThemedText>
-              <ThemedText
                 type="smallBold"
-                style={{ color: selected ? theme.accentText : theme.textSecondary }}
+                style={{ color: selected ? theme.accentText : theme.accent }}
               >
                 {group.title}
               </ThemedText>
+              {/* The count rides in a chip beside the label rather than dwarfing
+                  it — it is how many, not the point of the button. */}
+              <View
+                style={[
+                  styles.filterCount,
+                  {
+                    backgroundColor: selected ? 'rgba(255,255,255,0.22)' : theme.backgroundElement,
+                  },
+                ]}
+              >
+                <ThemedText
+                  type="small"
+                  style={{ color: selected ? theme.accentText : theme.accent }}
+                >
+                  {group.lines.length}
+                </ThemedText>
+              </View>
             </Pressable>
           );
         })}
@@ -476,15 +412,15 @@ export function CaseReportView({
         </View>
       ) : null}
 
-      {/* --- The selected filter's parts, in one card. ----------------------- */}
-      <View
-        style={[
-          styles.groupCard,
-          { borderColor: theme.border, backgroundColor: theme.backgroundElement },
-        ]}
-      >
+      {/* --- The selected filter's parts, one card each. --------------------- */}
+      <View style={styles.cardList}>
         {active.lines.length === 0 ? (
-          <View style={styles.groupRow}>
+          <View
+            style={[
+              styles.partCard,
+              { borderColor: theme.border, backgroundColor: theme.backgroundElement },
+            ]}
+          >
             <ThemedText type="small" themeColor="textSecondary">
               {active.empty}
             </ThemedText>
@@ -498,84 +434,103 @@ export function CaseReportView({
             const dropped = change != null && change.to < change.from;
 
             return (
-              // Rows fade in on a filter swap and when the model adds one, so a list that
-              // rearranged under your thumb is visibly a change rather than a redraw.
+              // Cards fade in on a filter swap and when the model adds one, so a list
+              // that rearranged under your thumb is visibly a change, not a redraw.
               // Staggered slightly, capped so a twelve-part list does not crawl.
               <Animated.View
                 key={line.part_id}
                 entering={FadeInDown.duration(180).delay(Math.min(index, 6) * 25)}
                 style={[
-                  styles.groupRow,
-                  index > 0 && {
-                    borderTopWidth: StyleSheet.hairlineWidth,
-                    borderTopColor: theme.border,
+                  styles.partCard,
+                  {
+                    borderColor: theme.border,
+                    backgroundColor:
+                      change != null || isNew ? theme.badgeFill : theme.backgroundElement,
                   },
-                  (change != null || isNew) && { backgroundColor: theme.badgeFill },
                 ]}
               >
-                <View style={styles.groupRowHead}>
-                  {isNew ? (
-                    <View style={[styles.newBadge, { backgroundColor: theme.accent }]}>
-                      <ThemedText type="small" style={{ color: theme.accentText }}>
-                        new
+                <View style={styles.partCardBody}>
+                  {/* The likelihood leads the card, at a size you can read at
+                      arm's length — it is the number the repairer sorts on.
+                      Only predictions carry it; a confirmed part is a fact. */}
+                  {confirmedView ? null : (
+                    <View style={styles.percentBlock}>
+                      <ThemedText style={styles.percentValue}>
+                        {Math.round(line.p * 100)}
+                      </ThemedText>
+                      <ThemedText style={[styles.percentSign, { color: theme.textSecondary }]}>
+                        %
                       </ThemedText>
                     </View>
-                  ) : null}
-                  <ThemedText style={styles.grow} numberOfLines={2}>
-                    {line.name}
-                    {line.qty > 1 ? (
-                      <ThemedText type="smallBold" style={{ color: theme.textSecondary }}>
-                        {'  '}\u00d7{line.qty}
-                      </ThemedText>
-                    ) : null}
-                  </ThemedText>
-
-                  {/* A settled part shows no probability: it is not a prediction any more,
-                      it is a fact. All it needs is a way out if the camera got it wrong. */}
-                  {confirmedView ? (
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={`Remove ${line.name} \u2014 not actually damaged`}
-                      disabled={busyId === line.part_id}
-                      onPress={() => onConfirm(line.part_id, false)}
-                      hitSlop={8}
-                      style={({ pressed }) => [styles.rowRemove, { opacity: pressed ? 0.5 : 1 }]}
-                    >
-                      <Ionicons name="close" size={18} color={theme.textSecondary} />
-                    </Pressable>
-                  ) : (
-                    <MatchBadge value={line.p} />
                   )}
-                </View>
 
-                {/* The move itself, in points, so it is legible from a metre away. */}
-                {change != null ? (
-                  <View style={styles.deltaRow}>
-                    <Ionicons
-                      name={dropped ? 'arrow-down' : 'arrow-up'}
-                      size={13}
-                      color={dropped ? theme.textSecondary : theme.danger}
-                    />
-                    <ThemedText
-                      type="smallBold"
-                      style={{ color: dropped ? theme.textSecondary : theme.danger }}
-                    >
-                      {dropped ? '' : '+'}
-                      {Math.round((change.to - change.from) * 100)} points
-                    </ThemedText>
-                    <ThemedText type="small" themeColor="textSecondary">
-                      was {Math.round(change.from * 100)}%
-                    </ThemedText>
+                  <View style={styles.grow}>
+                    <View style={styles.partCardHead}>
+                      {isNew ? (
+                        <View style={[styles.newBadge, { backgroundColor: theme.accent }]}>
+                          <ThemedText type="small" style={{ color: theme.accentText }}>
+                            new
+                          </ThemedText>
+                        </View>
+                      ) : null}
+                      <ThemedText type="rowTitle" style={styles.grow} numberOfLines={2}>
+                        {line.name}
+                        {line.qty > 1 ? (
+                          <ThemedText type="smallBold" style={{ color: theme.textSecondary }}>
+                            {'  ×'}{line.qty}
+                          </ThemedText>
+                        ) : null}
+                      </ThemedText>
+                    </View>
+
+                    {/* The move itself, in points, legible from a metre away. */}
+                    {change != null ? (
+                      <View style={styles.deltaRow}>
+                        <Ionicons
+                          name={dropped ? 'arrow-down' : 'arrow-up'}
+                          size={13}
+                          color={dropped ? theme.textSecondary : theme.danger}
+                        />
+                        <ThemedText
+                          type="smallBold"
+                          style={{ color: dropped ? theme.textSecondary : theme.danger }}
+                        >
+                          {dropped ? '' : '+'}
+                          {Math.round((change.to - change.from) * 100)} points
+                        </ThemedText>
+                        <ThemedText type="small" themeColor="textSecondary">
+                          was {Math.round(change.from * 100)}%
+                        </ThemedText>
+                      </View>
+                    ) : null}
+
+                    {confirmedView ? (
+                      <View style={styles.verifiedRow}>
+                        <Ionicons name="checkmark" size={14} color={theme.textSecondary} />
+                        <ThemedText type="small" themeColor="textSecondary">
+                          verified
+                        </ThemedText>
+                      </View>
+                    ) : (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={`Confirm ${line.name} is damaged`}
+                        disabled={busyId === line.part_id}
+                        onPress={() => onConfirm(line.part_id, true)}
+                        hitSlop={8}
+                        style={({ pressed }) => [
+                          styles.confirmLink,
+                          { opacity: pressed ? 0.5 : 1 },
+                        ]}
+                      >
+                        <ThemedText type="smallBold" style={{ color: theme.accent }}>
+                          Confirm
+                        </ThemedText>
+                        <Ionicons name="arrow-forward" size={14} color={theme.accent} />
+                      </Pressable>
+                    )}
                   </View>
-                ) : null}
-
-                {confirmedView ? null : (
-                  <CompactConfirm
-                    line={line}
-                    busy={busyId === line.part_id}
-                    onConfirm={onConfirm}
-                  />
-                )}
+                </View>
               </Animated.View>
             );
           })
@@ -710,13 +665,21 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.half,
   },
 
-  questionCard: { gap: Spacing.two, borderLeftWidth: 2, paddingLeft: Spacing.three },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two, marginTop: Spacing.one },
+  questionCard: {
+    gap: Spacing.three,
+    borderLeftWidth: 2,
+    paddingLeft: Spacing.three,
+    paddingVertical: Spacing.three,
+  },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two, marginTop: Spacing.two },
+  // Taller than the 44 minimum: the answer chips sit inside the question card and
+  // were reading as cramped against its border.
   chip: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: Radius.chip,
     paddingHorizontal: Spacing.three,
-    minHeight: 44,
+    paddingVertical: Spacing.two,
+    minHeight: 52,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -727,13 +690,22 @@ const styles = StyleSheet.create({
   filters: { flexDirection: 'row', gap: Spacing.two },
   filter: {
     flex: 1,
-    gap: Spacing.one,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.two,
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: Radius.card,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.three,
   },
-  filterCount: { fontSize: 30, lineHeight: 34 },
+  filterCount: {
+    minWidth: 22,
+    paddingHorizontal: Spacing.one,
+    paddingVertical: 1,
+    borderRadius: Radius.chip,
+    alignItems: 'center',
+  },
 
   // The one summarising block on the screen, so it keeps the crop marks.
   flagged: { gap: Spacing.two, alignItems: 'center' },
@@ -753,25 +725,35 @@ const styles = StyleSheet.create({
 
   // A group is one card: the header and its rows share a border, rather than the
   // rows floating underneath as separate cards.
-  groupCard: {
+  // One card per part, as the mockup has them — the grouped list read as a
+  // table, and a table invites scanning rather than deciding.
+  cardList: { gap: Spacing.two },
+  partCard: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: Radius.card,
-    overflow: 'hidden',
+    padding: Spacing.three,
   },
-  groupHead: {
+  partCardBody: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.three },
+  partCardHead: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+
+  // The likelihood, set large enough to sort on from arm's length.
+  percentBlock: { flexDirection: 'row', alignItems: 'flex-start', minWidth: 52 },
+  percentValue: { fontSize: 34, lineHeight: 38, fontWeight: '300', letterSpacing: -1 },
+  percentSign: { fontSize: 13, lineHeight: 20, marginTop: 4, marginLeft: 1 },
+
+  verifiedRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.two,
-    minHeight: TapTarget,
-    paddingHorizontal: Spacing.three,
-  },
-  groupRow: {
     gap: Spacing.one,
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.three,
-    borderTopWidth: StyleSheet.hairlineWidth,
+    marginTop: Spacing.one,
   },
-  groupRowHead: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  confirmLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one,
+    marginTop: Spacing.two,
+    minHeight: 28,
+  },
   rowRemove: {
     width: 32,
     height: 32,

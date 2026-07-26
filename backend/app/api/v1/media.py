@@ -26,8 +26,9 @@ async def upload(
     if case is None:
         raise ApiError("case_not_found", f"no case {case_id}")
 
-    if len(files) > media_service.MAX_FILES_PER_REQUEST:
-        raise ApiError("media_too_large", "at most 10 files per request")
+    limit = media_service.MAX_FILES_PER_REQUEST
+    if limit is not None and len(files) > limit:
+        raise ApiError("media_too_large", f"at most {limit} files per request")
 
     assets = []
     for upload_file in files:
