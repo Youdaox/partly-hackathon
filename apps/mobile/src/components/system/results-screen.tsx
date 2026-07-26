@@ -100,6 +100,24 @@ export function ResultsScreen({
 
   const regions = useMemo(() => regionsFromReport(report), [report]);
 
+  /**
+   * part_id -> the mesh it sits on.
+   *
+   * `regionsFromReport` already grouped every placeable line onto a mesh, so this inverts
+   * that rather than repeating the klass/side/zone mapping. Parts with no `klass` — hardware
+   * and consumables never carry one — are absent, which is what leaves their cards inert
+   * instead of selecting the wrong panel.
+   */
+  const meshByPart = useMemo(() => {
+    const index = new Map<string, string>();
+    for (const region of regions) {
+      for (const part of region.parts) {
+        if (!index.has(part.partId)) index.set(part.partId, region.meshName);
+      }
+    }
+    return index;
+  }, [regions]);
+
   const groups = useMemo(() => {
     if (!report) return { confirmed: [] as ReportLine[], predicted: [] as ReportLine[] };
     const ticked = (line: ReportLine) => line.confirmed != null;
@@ -204,7 +222,9 @@ export function ResultsScreen({
             {tab === 'confirmed' ? 'Nothing confirmed yet.' : 'Nothing else predicted.'}
           </ThemedText>
         ) : (
-          active.map((line) => (
+          active.map((line) => {
+            const mesh = meshByPart.get(line.part_id) ?? null;
+            return (
             <PartCard
               key={line.part_id}
               name={line.name}
@@ -212,6 +232,14 @@ export function ResultsScreen({
               reasoning={reasoning(line)}
               confirmed={line.confirmed != null || tab === 'confirmed'}
               busy={busyId === line.part_id}
+              // Tapping the card lights this part's mesh on the model above; tapping it
+              // again clears, so the same gesture is the way back out.
+              onPress={
+                mesh
+                  ? () => setSelectedMesh((current) => (current === mesh ? null : mesh))
+                  : undefined
+              }
+              selected={mesh != null && mesh === selectedMesh}
               onConfirm={tab === 'confirmed' ? undefined : () => onConfirm(line.part_id, true)}
               // `false` is "I looked, it is fine" — the engine clamps it to zero and drops
               // the part from the report entirely. Available on both tabs: a confirmed row
@@ -229,7 +257,8 @@ export function ResultsScreen({
                 setOpenDiagram((current) => (current === line.part_id ? null : line.part_id))
               }
             />
-          ))
+          );
+        })
         )}
       </ScrollView>
 

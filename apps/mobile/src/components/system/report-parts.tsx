@@ -104,6 +104,15 @@ export interface PartCardProps {
   /** Tints the card when the last answer moved this row. */
   moved?: boolean;
   /**
+   * Select the part, which lights its mesh on the 3D model above.
+   *
+   * The card is the whole hit target rather than a separate chevron: a repairer reading the
+   * list wants to see where a name sits on the car, and that should not cost aim.
+   */
+  onPress?: () => void;
+  /** True when this part's mesh is the one currently lit on the model. */
+  selected?: boolean;
+  /**
    * The exploded diagram for this part, when the catalogue ships one.
    *
    * Only a fraction of diagrams have an `image.webp` — `diagram_available` on
@@ -124,15 +133,30 @@ export function PartCard({
   onRemove,
   busy,
   moved,
+  onPress,
+  selected,
   diagramUrl,
   diagramOpen,
   onToggleDiagram,
 }: PartCardProps) {
+  // A plain View when there is nothing to select, so a card without a mesh does not
+  // advertise a tap that does nothing.
+  const Shell = onPress ? Pressable : View;
+
   return (
-    <View
+    <Shell
+      {...(onPress
+        ? {
+            accessibilityRole: 'button' as const,
+            accessibilityState: { selected: !!selected },
+            accessibilityLabel: `${name} — show on the model`,
+            onPress,
+          }
+        : {})}
       style={[
         styles.card,
         moved ? { backgroundColor: Intake.accentPale, borderColor: Intake.accentPaleBorder } : null,
+        selected ? styles.cardSelected : null,
       ]}
     >
       {confirmed ? null : (
@@ -249,7 +273,7 @@ export function PartCard({
           </>
         ) : null}
       </View>
-    </View>
+    </Shell>
   );
 }
 
@@ -342,6 +366,8 @@ const styles = StyleSheet.create({
   cardMeta: { fontFamily: Faces.sans, fontSize: 11.5, color: Intake.mutedLabel },
   verified: { fontFamily: Faces.sans, fontSize: 12, color: Intake.secondary },
   // Capped so a long label does not stretch the tap target the width of the card.
+  // Selected: the accent edge, matching the marker lit on the model above.
+  cardSelected: { borderColor: Intake.accent, backgroundColor: Intake.accentPale },
   confirmLink: { minHeight: 28, maxWidth: 160, justifyContent: 'center' },
   confirmText: { fontFamily: Faces.sansMedium, fontSize: 12.5, color: Intake.accent },
   // Both actions on one line; the accent stays on the one that adds to the order, so
