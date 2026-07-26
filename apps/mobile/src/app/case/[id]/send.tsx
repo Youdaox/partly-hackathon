@@ -14,19 +14,17 @@
  * properly. The counts and the price range say the same thing in one line.
  */
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   Linking,
-  Platform,
   Pressable,
   ScrollView,
-  Share,
   StyleSheet,
   TextInput,
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { formatPrice } from '@partli/shared';
 
 import { ThemedText } from '@/components/themed-text';
@@ -44,9 +42,15 @@ export default function SendToCustomerScreen() {
 
   // Sending on mount is the point of this screen — there is nothing to configure.
   const quote = useAsyncData(() => backend.sendToCustomer(caseId), [caseId]);
+  // Only for the header. Cheap, and it keeps the title consistent with the
+  // report screen this was opened from.
+  const detail = useAsyncData(() => backend.getCase(caseId), [caseId]);
+  const vehicle = detail.data?.report?.vehicle ?? null;
+  const vehicleTitle = vehicle
+    ? [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(' ') || vehicle.rego
+    : '';
 
   const [resending, setResending] = useState(false);
-  const [copied, setCopied] = useState(false);
   const [showParts, setShowParts] = useState(false);
   const [email, setEmail] = useState('');
   const [actionError, setActionError] = useState<{ title: string; detail?: string } | null>(null);
@@ -63,56 +67,7 @@ export default function SendToCustomerScreen() {
     }
   }, [caseId, quote]);
 
-  /**
-   * Hand the link over.
-   *
-   * Web and native need different things. `navigator.share` needs a secure context, throws
-   * if an earlier share is still open, and rejects when the sheet is dismissed — so on web
-   * this copies instead, which is what the button has always said it does.
-   *
-   * `navigator.clipboard` is itself unavailable over plain http on a LAN address, so there
-   * is an execCommand fallback for exactly the case this demo runs in.
-   */
-  const busy = useRef(false);
-
-  const share = useCallback(async () => {
-    const url = quote.data?.approval_url;
-    // The guard is the fix for "an earlier share has not yet completed": the link and the
-    // button both call this, and a double tap used to start a second share.
-    if (!url || busy.current) return;
-    busy.current = true;
-    setActionError(null);
-
-    try {
-      if (Platform.OS === 'web') {
-        if (navigator?.clipboard?.writeText) {
-          await navigator.clipboard.writeText(url);
-        } else {
-          // Non-secure context: no Clipboard API. A throwaway textarea still works.
-          const field = document.createElement('textarea');
-          field.value = url;
-          field.style.position = 'fixed';
-          field.style.opacity = '0';
-          document.body.appendChild(field);
-          field.select();
-          document.execCommand('copy');
-          document.body.removeChild(field);
-        }
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-      } else {
-        await Share.share({ message: `Your repair options are ready: ${url}`, url });
-      }
-    } catch (err) {
-      // Dismissing the share sheet rejects with AbortError. Not worth reporting.
-      if (!(err instanceof Error) || err.name !== 'AbortError') {
-        setActionError(toErrorInfo(err));
-      }
-    } finally {
-      busy.current = false;
-    }
-  }, [quote.data]);
-
+  
   /**
    * Email the link.
    *
@@ -129,7 +84,7 @@ export default function SendToCustomerScreen() {
     if (!to || !to.includes('@')) {
       setActionError({
         title: 'That does not look like an email address',
-        detail: 'Enter the customer’s address, or use Copy link instead.',
+        detail: 'Enter the customer’s address to send them the link.',
       });
       return;
     }
@@ -175,6 +130,7 @@ export default function SendToCustomerScreen() {
   if (quote.loading) {
     return (
       <ThemedView style={styles.container}>
+      <Stack.Screen options={{ title: vehicleTitle, headerTitleAlign: 'center' }} />
         <Loading label="Building the quote…" />
       </ThemedView>
     );
@@ -184,6 +140,7 @@ export default function SendToCustomerScreen() {
     const error = actionError ?? quote.error;
     return (
       <ThemedView style={styles.container}>
+      <Stack.Screen options={{ title: vehicleTitle, headerTitleAlign: 'center' }} />
         <View style={styles.padded}>
           {error ? <ErrorNotice title={error.title} detail={error.detail} /> : null}
           <View style={styles.retry}>
@@ -199,6 +156,7 @@ export default function SendToCustomerScreen() {
 
   return (
     <ThemedView style={styles.container}>
+      <Stack.Screen options={{ title: vehicleTitle, headerTitleAlign: 'center' }} />
       <ScrollView contentContainerStyle={styles.list}>
         {error ? <ErrorNotice title={error.title} detail={error.detail} /> : null}
 
@@ -258,27 +216,26 @@ export default function SendToCustomerScreen() {
           address.
         </ThemedText>
 
-        <Pressable onPress={share} accessibilityRole="button" style={styles.linkWrap}>
-          <ThemedText type="small" style={[styles.link, { color: theme.accent }]} numberOfLines={1}>
-            {result.approval_url}
-          </ThemedText>
-        </Pressable>
-
-        <Button
-          title={Platform.OS === 'web' ? (copied ? 'Copied' : 'Copy link') : 'Share link'}
-          variant={copied ? 'success' : 'secondary'}
-          onPress={share}
-          fullWidth
-        />
-
         {/* One line instead of 66 rows. */}
         <View style={[styles.summary, { borderTopColor: theme.border, borderBottomColor: theme.border }]}>
           <View style={styles.summaryRow}>
-            <ThemedText type="rowTitle">{result.lines.length} parts</ThemedText>
-            <ThemedText type="rowTitle">
-              {formatPrice(range.low)}
-              {range.high > range.low ? ` – ${formatPrice(range.high)}` : ''}
-            </ThemedText>
+            <View style={styles.summaryLeft}>
+              <ThemedText type="rowTitle">{result.lines.length} parts</ThemedText>
+              <ThemedText type="small" themeColor="textSecondary">
+                Comprehensive assessment
+              </ThemedText>
+            </View>
+            {/* Labelled a range, because it is one — three plans priced per part,
+                not a number the shop is committing to. */}
+            <View style={styles.summaryRight}>
+              <ThemedText type="rowTitle" style={styles.summaryPrice}>
+                {formatPrice(range.low)}
+                {range.high > range.low ? ` – ${formatPrice(range.high)}` : ''}
+              </ThemedText>
+              <ThemedText type="label" style={{ color: theme.textSecondary }}>
+                ESTIMATED RANGE
+              </ThemedText>
+            </View>
           </View>
           <ThemedText type="small" themeColor="textSecondary">
             The customer picks from three plans: best price, our recommendation, or all
@@ -328,10 +285,6 @@ export default function SendToCustomerScreen() {
             Re-prices against any parts you have confirmed since. The link stays the same.
           </ThemedText>
         </View>
-
-        <ThemedText type="small" themeColor="textSecondary" style={styles.footnote}>
-          Simulated pricing — the dataset ships no price, stock or supplier data.
-        </ThemedText>
       </ScrollView>
     </ThemedView>
   );
@@ -381,7 +334,15 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  summaryRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' },
+  summaryLeft: { flexShrink: 1, gap: 2 },
+  summaryRight: { alignItems: 'flex-end', flexShrink: 1, gap: 2 },
+  summaryPrice: { textAlign: 'right' },
+  summaryRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: Spacing.three,
+  },
 
   disclosure: { alignSelf: 'center', minHeight: 30, justifyContent: 'center' },
   partRow: {
