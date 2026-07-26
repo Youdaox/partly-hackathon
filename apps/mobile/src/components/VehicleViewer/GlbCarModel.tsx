@@ -35,7 +35,13 @@ import { useGLTF } from '@react-three/drei';
 import type { ThreeEvent } from '@react-three/fiber';
 
 import type { DamageRegion } from '@/types/damage';
-import { MODEL_RECENTER, MODEL_ROTATION_Y, MODEL_SCALE, nearestExteriorMesh } from './carLayout';
+import {
+  MODEL_RECENTER,
+  MODEL_ROTATION_Y,
+  MODEL_SCALE,
+  exteriorMeshNames,
+  nearestExteriorMesh,
+} from './carLayout';
 import { PartOverlays } from './PartOverlays';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports -- Metro asset require, not a module import
@@ -60,7 +66,10 @@ export function GlbCarModel({
 
   const handleBodyPointerDown = (event: ThreeEvent<PointerEvent>) => {
     event.stopPropagation();
-    const meshName = nearestExteriorMesh([event.point.x, event.point.y, event.point.z]);
+    const meshName = nearestExteriorMesh(
+      [event.point.x, event.point.y, event.point.z],
+      exteriorMeshNames(),
+    );
     if (meshName) onSelectPart(meshName);
   };
 

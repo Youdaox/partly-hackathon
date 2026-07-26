@@ -297,6 +297,17 @@ export const backend = {
 };
 
 /**
+ * The URL for one diagram's `image.webp` (spec 6.1) — served immutable, so the
+ * exploded-diagram viewer can point straight at it and let the platform cache
+ * it for good. Callers must check `diagram_available` on the report line
+ * first: the catalogue references far more diagrams than ship with the
+ * bundle, and this endpoint 404s for the rest.
+ */
+export function diagramImageUrl(slug: string, diagramId: string): string {
+  return `${BACKEND_BASE_URL}/vehicles/${slug}/diagrams/${diagramId}/image`;
+}
+
+/**
  * Wait for a vehicle to stop resolving.
  *
  * `POST /vehicle/register` returns straight away with `status: "resolving"`, and

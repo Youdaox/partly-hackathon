@@ -7,9 +7,11 @@
  * X-ray mode that reveals parts not visible from outside (engine, structural
  * members) so they can be located too, not just flagged as damaged.
  *
- * Runs entirely on mock data (see data/mockDamageData.ts) — there is no detection
- * pipeline or backend call here yet. The `id` route param is accepted so this slots
- * into the existing job/[id]/* navigation, but nothing here reads real job state.
+ * Driven by the same case the rest of the app uses — `useCase(caseId)` — so a
+ * repairer who has been describing damage to the assistant lands on a viewer
+ * that already agrees with it. `regionsFromReport` (lib/damage-regions.ts) does
+ * the join between the report's real catalogue parts and this screen's ~20
+ * hand-placed mesh regions.
  */
 
 import { useMemo, useState } from 'react';
@@ -18,7 +20,7 @@ import { useLocalSearchParams } from 'expo-router';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Button, Card } from '@/components/ui';
+import { Button, Card, ErrorNotice, Loading } from '@/components/ui';
 import { DamageCard } from '@/components/Damage/DamageCard';
 import { DamageLegend } from '@/components/Damage/DamageLegend';
 import { DamageToggle } from '@/components/Damage/DamageToggle';
@@ -28,30 +30,32 @@ import { labelForMesh } from '@/components/VehicleViewer/carLayout';
 import { VehicleViewer } from '@/components/VehicleViewer/VehicleViewer';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { mockDamageData } from '@/data/mockDamageData';
+import { useCase } from '@/hooks/use-case';
+import { diagramImageUrl } from '@/lib/backend';
+import { regionsFromReport } from '@/lib/damage-regions';
+import type { RegionPart } from '@/types/damage';
 
 export default function InspectionViewerScreen() {
   const theme = useTheme();
-  const params = useLocalSearchParams<{
-    id: string;
-    vehicleLabel?: string;
-    assessment?: string;
-  }>();
+  const { id: caseId } = useLocalSearchParams<{ id: string }>();
+
+  const kase = useCase(caseId ?? null);
+  const regions = useMemo(() => regionsFromReport(kase.report), [kase.report]);
 
   const [showVisible, setShowVisible] = useState(true);
   const [showInvisible, setShowInvisible] = useState(false);
   const [selectedMeshName, setSelectedMeshName] = useState<string | null>(null);
   const [summaryVisible, setSummaryVisible] = useState(false);
-  const [diagramVisible, setDiagramVisible] = useState(false);
+  const [diagramPart, setDiagramPart] = useState<RegionPart | null>(null);
 
   const activeRegions = useMemo(
     () =>
-      mockDamageData.filter(
+      regions.filter(
         (region) =>
           (region.damageType === 'visible' && showVisible) ||
           (region.damageType === 'invisible' && showInvisible),
       ),
-    [showVisible, showInvisible],
+    [regions, showVisible, showInvisible],
   );
 
   const selectedRegion = selectedMeshName
@@ -74,57 +78,83 @@ export default function InspectionViewerScreen() {
   // damage is toggled on and nothing is selected yet.
   const showInsightBanner = showInvisible && !selectedRegion && activeRegions.some((r) => r.damageType === 'invisible');
 
+  const vehicleTitle = kase.vehicle
+    ? [kase.vehicle.year, kase.vehicle.make, kase.vehicle.model].filter(Boolean).join(' ') ||
+      kase.vehicle.rego
+    : 'Loading vehicle…';
+  const impact = kase.report?.impact;
+  const impactLabel = impact?.zone
+    ? `${impact.zone}${impact.side && impact.side !== 'C' ? `-${impact.side}` : ''} collision`.replace(
+        /^./,
+        (c) => c.toUpperCase(),
+      )
+    : undefined;
+
+  const slug = kase.vehicle?.slug ?? null;
+  const diagramImage =
+    diagramPart?.diagramAvailable && diagramPart.diagramId && slug
+      ? { uri: diagramImageUrl(slug, diagramPart.diagramId) }
+      : undefined;
+
   return (
     <ThemedView style={styles.container}>
       <View style={[styles.header, { borderBottomColor: theme.border }]}>
-        {/* The fallback is the demo vehicle, so this screen and the prediction
-            flow name the same car when no params are passed. */}
-        <ThemedText type="smallBold">{params.vehicleLabel ?? 'Toyota Yaris 2023 · QMN16'}</ThemedText>
+        <ThemedText type="smallBold">{vehicleTitle}</ThemedText>
         <ThemedText type="small" themeColor="textSecondary">
-          {params.assessment ?? 'Front-right collision assessment'}
+          {impactLabel ?? 'Diagnosis'}
         </ThemedText>
       </View>
 
-      <View style={styles.viewerArea}>
-        <VehicleViewer
-          activeRegions={activeRegions}
-          showInvisible={showInvisible}
-          selectedMeshName={selectedMeshName}
-          onSelectPart={selectPart}
-        />
-
-        <View style={styles.legendOverlay}>
-          <DamageLegend />
+      {kase.loading ? (
+        <Loading label="Loading the report…" />
+      ) : kase.error && regions.length === 0 ? (
+        <View style={styles.padded}>
+          <ErrorNotice title={kase.error.title} detail={kase.error.detail} />
         </View>
+      ) : (
+        <>
+          <View style={styles.viewerArea}>
+            <VehicleViewer
+              activeRegions={activeRegions}
+              showInvisible={showInvisible}
+              selectedMeshName={selectedMeshName}
+              onSelectPart={selectPart}
+            />
 
-        {showInsightBanner ? (
-          <View style={styles.insightBanner}>
-            <Card>
-              <ThemedText type="smallBold">AI Insight</ThemedText>
-              <ThemedText type="small" themeColor="textSecondary">
-                The collision angle and bumper deformation indicate there may be damage behind
-                the visible impact area. Tap a glowing part to see why.
-              </ThemedText>
-            </Card>
+            <View style={styles.legendOverlay}>
+              <DamageLegend />
+            </View>
+
+            {showInsightBanner ? (
+              <View style={styles.insightBanner}>
+                <Card>
+                  <ThemedText type="smallBold">AI Insight</ThemedText>
+                  <ThemedText type="small" themeColor="textSecondary">
+                    The collision angle and bumper deformation indicate there may be damage behind
+                    the visible impact area. Tap a glowing part to see why.
+                  </ThemedText>
+                </Card>
+              </View>
+            ) : null}
           </View>
-        ) : null}
-      </View>
 
-      <View style={[styles.footer, { borderTopColor: theme.border }]}>
-        <DamageToggle
-          showVisible={showVisible}
-          showInvisible={showInvisible}
-          onToggleVisible={() => setShowVisible((v) => !v)}
-          onToggleInvisible={() => setShowInvisible((v) => !v)}
-        />
-        <Button
-          title={`Damage summary (${activeRegions.length})`}
-          variant="secondary"
-          onPress={() => setSummaryVisible(true)}
-          disabled={activeRegions.length === 0}
-          fullWidth
-        />
-      </View>
+          <View style={[styles.footer, { borderTopColor: theme.border }]}>
+            <DamageToggle
+              showVisible={showVisible}
+              showInvisible={showInvisible}
+              onToggleVisible={() => setShowVisible((v) => !v)}
+              onToggleInvisible={() => setShowInvisible((v) => !v)}
+            />
+            <Button
+              title={`Damage summary (${activeRegions.length})`}
+              variant="secondary"
+              onPress={() => setSummaryVisible(true)}
+              disabled={activeRegions.length === 0}
+              fullWidth
+            />
+          </View>
+        </>
+      )}
 
       <Modal visible={summaryVisible} animationType="slide" onRequestClose={() => setSummaryVisible(false)}>
         <ThemedView style={styles.container}>
@@ -154,24 +184,24 @@ export default function InspectionViewerScreen() {
         region={selectedRegion}
         visible={selectedMeshName !== null}
         onClose={closeSheet}
-        onViewDiagram={() => setDiagramVisible(true)}
+        onSelectPart={setDiagramPart}
       />
 
-      {selectedRegion ? (
-        <ExplodedDiagram
-          visible={diagramVisible}
-          onClose={() => setDiagramVisible(false)}
-          title={`${selectedRegion.partName} assembly`}
-          parts={selectedRegion.parts}
-          selectedPart={selectedRegion.parts[0]}
-        />
-      ) : null}
+      <ExplodedDiagram
+        visible={diagramPart !== null}
+        onClose={() => setDiagramPart(null)}
+        title={diagramPart?.name ?? ''}
+        parts={selectedRegion?.parts.map((p) => p.name) ?? []}
+        selectedPart={diagramPart?.name}
+        diagramImage={diagramImage}
+      />
     </ThemedView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  padded: { padding: Spacing.three },
   header: {
     paddingHorizontal: Spacing.three,
     paddingTop: Spacing.six,
