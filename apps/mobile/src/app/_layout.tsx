@@ -2,7 +2,7 @@ import { DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
-import { Colors } from '@/constants/theme';
+import { BrandTitleStyle, Colors } from '@/constants/theme';
 import '@/global.css';
 
 /**
@@ -37,7 +37,10 @@ export default function RootLayout() {
         >
           {/* index sets its own header, so it can wire the hamburger to screen state.
               Without these two the header falls back to printing the route path. */}
-          <Stack.Screen name="index" options={{ title: 'Partli' }} />
+          <Stack.Screen
+            name="index"
+            options={{ title: 'Partli', headerTitleStyle: BrandTitleStyle }}
+          />
           <Stack.Screen name="case/[id]" options={{ title: 'Diagnosis' }} />
           <Stack.Screen name="case/[id]/send" options={{ title: 'Send to customer' }} />
           <Stack.Screen name="case/[id]/inspection" options={{ title: '3D inspection' }} />

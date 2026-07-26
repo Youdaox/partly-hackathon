@@ -30,7 +30,7 @@ import { RegoEntry } from '@/components/rego-entry';
 import { Framed } from '@/components/framed';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Spacing } from '@/constants/theme';
+import { BrandTitleStyle, Spacing } from '@/constants/theme';
 import { toErrorInfo } from '@/hooks/use-async-data';
 import { useCase, type ErrorInfo, type MediaFile } from '@/hooks/use-case';
 import { useTheme } from '@/hooks/use-theme';
@@ -178,6 +178,8 @@ export default function HomeScreen() {
         options={{
           title,
           headerTitleAlign: 'center',
+          // Only the wordmark gets the larger size; the mid-job header is empty anyway.
+          headerTitleStyle: BrandTitleStyle,
           // Back once there is a step to go back to, the drawer otherwise. The three
           // steps live on one route, so this walks them rather than popping a screen.
           headerLeft: () =>

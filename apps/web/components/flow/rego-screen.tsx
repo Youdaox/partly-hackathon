@@ -80,7 +80,7 @@ export function RegoScreen({ onReady }: RegoScreenProps) {
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-xl flex-col justify-center px-6 py-16">
       <div className="animate-screen-in">
-        <p className="text-sm font-medium text-primary">Partli</p>
+        <p className="text-lg font-medium text-primary">Partli</p>
         <h1 className="mt-2 text-3xl font-semibold tracking-tight">Enter your rego</h1>
         <p className="mt-3 text-sm text-muted-foreground">
           Enter the registration to pull the vehicle&rsquo;s exact OEM parts — and how

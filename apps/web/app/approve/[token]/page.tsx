@@ -57,7 +57,7 @@ export default async function ApprovePage({
   return (
     <main className="mx-auto w-full max-w-lg px-4 py-8 sm:py-12">
       <header className="mb-6">
-        <p className="text-sm font-medium text-primary">Partli</p>
+        <p className="text-lg font-medium text-primary">Partli</p>
         <h1 className="mt-1 text-2xl font-semibold tracking-tight">
           Your repair options are ready
         </h1>

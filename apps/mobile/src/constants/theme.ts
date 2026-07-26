@@ -93,6 +93,22 @@ export const Fonts = Platform.select({
   },
 });
 
+/**
+ * The "Partli" wordmark in the nav bar, one size for every screen that shows it.
+ *
+ * Two steps above react-navigation's 17pt default title, because it is a wordmark
+ * rather than a page name — the branded entry screen should read as the front door.
+ * It carries colour and weight as well as size: react-navigation replaces
+ * `headerTitleStyle` wholesale rather than merging it, so a screen that sets its own
+ * header has to hand back the whole style. The web wordmark (`text-lg`) is kept in
+ * step with this by eye, not by import.
+ */
+export const BrandTitleStyle = {
+  color: Colors.light.text,
+  fontWeight: '700',
+  fontSize: 22,
+} as const;
+
 export const Spacing = {
   half: 2,
   one: 4,
