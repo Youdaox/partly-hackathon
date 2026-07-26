@@ -11,43 +11,57 @@ import '@/global.css';
 
 import { Platform, type TextStyle } from 'react-native';
 
+/**
+ * The palette.
+ *
+ * Two rules it is built on, both for a phone held at the side of a car:
+ *
+ * 1. **Cards are white on grey.** They used to be `#F7F7F5` on `#F1F1EF` — a 2.5%
+ *    difference, which is invisible in daylight and made every list read as one flat
+ *    slab. A true-white surface on a cool grey page is the standard mobile grouped-list
+ *    treatment because it survives glare.
+ * 2. **One accent, two weights.** A mid navy for links and outlines, a darker navy for
+ *    filled surfaces that carry white text. Everything else is greyscale, so the only
+ *    colour on the screen means "this is actionable" — apart from the semantic
+ *    success/danger pair on the ✓/✗ pair, which must stay distinguishable.
+ */
 export const Colors = {
   light: {
-    text: '#191C1F',
-    background: '#F1F1EF',
+    text: '#101828',
+    background: '#F2F4F7',
     /** Cards and the prompt box: a shade lighter than the page. */
-    backgroundElement: '#F7F7F5',
-    backgroundSelected: '#E4E6E4',
-    textSecondary: '#5F6570',
-    border: '#D6D8D9',
-    accent: '#5B7A9D',
+    backgroundElement: '#FFFFFF',
+    backgroundSelected: '#E7EBF0',
+    textSecondary: '#5B6472',
+    border: '#E3E7EC',
+    accent: '#3D5A80',
     accentText: '#FFFFFF',
     /** Leading icons in the prompt box and suggestion rows. */
-    iconMuted: '#7C96B4',
+    iconMuted: '#7C8CA3',
     /** The little `+` ticks that frame a card. */
-    cropMark: '#B4B8BB',
+    cropMark: '#C3C9D1',
     /** Filled match badges and numbered step badges. */
-    badgeFill: '#E4E9EF',
-    badgeText: '#44607F',
-    success: '#2F6B46',
-    danger: '#A93636',
+    badgeFill: '#E8EEF6',
+    badgeText: '#2C4763',
+    success: '#14804A',
+    danger: '#B3261E',
     warning: '#8A5A1A',
   },
   dark: {
-    text: '#ECEDEE',
-    background: '#16181A',
-    backgroundElement: '#1F2225',
-    backgroundSelected: '#2C3033',
-    textSecondary: '#A0A6AE',
-    border: '#33383C',
-    accent: '#8FAECF',
-    accentText: '#10161C',
-    iconMuted: '#7C96B4',
-    cropMark: '#4A4F54',
-    badgeFill: '#25303C',
-    badgeText: '#A9C4DE',
-    success: '#6BC08C',
-    danger: '#E08585',
+    text: '#E9EDF2',
+    background: '#101418',
+    backgroundElement: '#191F26',
+    backgroundSelected: '#232B34',
+    textSecondary: '#9AA5B1',
+    border: '#2A323B',
+    accent: '#8FB3DA',
+    accentText: '#0B1016',
+    iconMuted: '#7C8CA3',
+    cropMark: '#3A434D',
+    badgeFill: '#1D2A38',
+    badgeText: '#A9C6E6',
+    success: '#45C486',
+    danger: '#F2837B',
     warning: '#D8A24A',
   },
 } as const;

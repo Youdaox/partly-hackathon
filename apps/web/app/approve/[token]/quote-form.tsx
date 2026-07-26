@@ -1,86 +1,129 @@
 'use client';
 
 /**
- * The customer's side of the quote: one supplier choice per part, or decline the part.
+ * The customer's side of the quote: three whole-job plans rather than a supplier choice per
+ * part. Somebody whose car is off the road wants to trade money against time once, not
+ * twenty times.
  *
- * Offers are pre-selected to whichever the backend marks `recommended`, so a customer
- * who agrees with the recommendation can submit without touching anything.
+ * The plans are *derived from the offers*, never asserted. Each part carries real prices,
+ * lead times and stock flags, so "cheapest" and "fastest" fall out of the data — which also
+ * means the page cannot claim a trade-off the quote does not actually contain.
  *
- * Ported from the case-id-addressed page onto the token flow: the quote is fetched and
- * submitted via `/v1/approve/{token}`, so the link a customer holds cannot be walked to
- * another job by editing the URL.
+ * Submission is still per-part: a plan is just a way of choosing one offer per line, so the
+ * repairer receives exactly which supplier was accepted for every part.
  */
 
 import { useMemo, useState, useTransition } from 'react';
-import { CheckCircle2 } from 'lucide-react';
-import { formatLeadTime, formatPrice, type ApprovalLine, type ApprovalPick } from '@partli/shared';
+import { CheckCircle2, Clock, Wrench } from 'lucide-react';
+import { formatPrice, type ApprovalLine, type ApprovalOption, type ApprovalPick } from '@partli/shared';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { approvePicks } from './actions';
 
-const KIND_LABEL: Record<string, string> = {
-  visible: 'Seen on your vehicle',
-  hidden: 'Found before teardown',
-};
+/** Days in the workshop once every part has landed. Simulated, like the pricing. */
+const FITTING_DAYS = 3;
 
-const KIND_INTRO: Record<string, string> = {
-  visible: 'Damage in the photos of your car. Confirmed, not estimated.',
-  hidden: 'Parts behind the panels, predicted from where the impact landed.',
-};
+type PlanId = 'budget' | 'balanced' | 'genuine';
 
-/**
- * Confidence, in the three bands a decision actually has.
- *
- * Shown for predicted parts only. A part in `visible` is damage a customer can
- * see in their own photos, and putting "95%" beside it invites them to wonder
- * about the other 5% of something that is not in doubt. Matches the repairer's
- * app, so the two sides of the same job read the same way.
- */
-function Likelihood({ p }: { p: number }) {
-  const [label, tone] =
-    p >= 0.8
-      ? ['Very likely', 'default' as const]
-      : p >= 0.6
-        ? ['Likely', 'secondary' as const]
-        : ['Possible', 'outline' as const];
-  return <Badge variant={tone}>{label}</Badge>;
+interface Plan {
+  id: PlanId;
+  title: string;
+  blurb: string;
+  /** part_id -> chosen offer. */
+  choices: Map<string, ApprovalOption>;
+  total: number;
+  /** The job waits on its slowest part, so this is a max and not a sum. */
+  leadDays: number;
+  genuineCount: number;
+}
+
+/** Cheapest offer for a line, used as the fallback everywhere. */
+function cheapestOf(options: ApprovalOption[]): ApprovalOption | undefined {
+  return [...options].sort((a, b) => a.price_nzd - b.price_nzd)[0];
+}
+
+function buildPlan(
+  id: PlanId,
+  title: string,
+  blurb: string,
+  lines: ApprovalLine[],
+  choose: (options: ApprovalOption[]) => ApprovalOption | undefined,
+): Plan {
+  const choices = new Map<string, ApprovalOption>();
+  let total = 0;
+  let leadDays = 0;
+  let genuineCount = 0;
+
+  for (const line of lines) {
+    if (line.options.length === 0) continue;
+    const chosen = choose(line.options) ?? cheapestOf(line.options);
+    if (!chosen) continue;
+
+    choices.set(line.part_id, chosen);
+    total += chosen.price_nzd * line.qty;
+    leadDays = Math.max(leadDays, chosen.lead_days);
+    if (chosen.tier === 'oem') genuineCount += 1;
+  }
+
+  return { id, title, blurb, choices, total, leadDays, genuineCount };
+}
+
+/** "Tue 12 Aug" — the day the car is realistically back, not the parts ETA. */
+function readyDate(leadDays: number): string {
+  const date = new Date();
+  date.setDate(date.getDate() + leadDays + FITTING_DAYS);
+  return date.toLocaleDateString('en-NZ', { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
 export function QuoteForm({ token, lines }: { token: string; lines: ApprovalLine[] }) {
-  // Default every line to the recommended option, falling back to the first.
-  const [picks, setPicks] = useState<Record<string, string | null>>(() =>
-    Object.fromEntries(
-      lines.map((line) => [
-        line.part_id,
-        (line.options.find((o) => o.recommended) ?? line.options[0])?.id ?? null,
-      ]),
-    ),
-  );
+  const plans = useMemo<Plan[]>(() => {
+    const quotable = lines.filter((line) => line.options.length > 0);
+
+    return [
+      buildPlan(
+        'budget',
+        'Best price',
+        'Aftermarket parts wherever they are available.',
+        quotable,
+        cheapestOf,
+      ),
+      buildPlan(
+        'balanced',
+        'Recommended',
+        'Our pick per part, balancing price against how soon we can get it.',
+        quotable,
+        (options) => options.find((o) => o.recommended),
+      ),
+      buildPlan(
+        'genuine',
+        'All genuine parts',
+        'Manufacturer parts throughout, where the maker supplies one.',
+        quotable,
+        (options) => cheapestOf(options.filter((o) => o.tier === 'oem')),
+      ),
+    ];
+  }, [lines]);
+
+  const [selected, setSelected] = useState<PlanId>('balanced');
+  const [showParts, setShowParts] = useState(false);
   const [pending, startTransition] = useTransition();
   const [result, setResult] = useState<{ ok: boolean; message?: string } | null>(null);
 
-  const total = useMemo(
-    () =>
-      lines.reduce((sum, line) => {
-        const chosen = line.options.find((o) => o.id === picks[line.part_id]);
-        return chosen ? sum + chosen.price_nzd * line.qty : sum;
-      }, 0),
-    [lines, picks],
-  );
-
-  const accepted = lines.filter((line) => picks[line.part_id]).length;
+  const plan = plans.find((p) => p.id === selected) ?? plans[1];
+  const cheapest = Math.min(...plans.map((p) => p.total));
+  const soonest = Math.min(...plans.map((p) => p.leadDays));
 
   const submit = () => {
     startTransition(async () => {
-      const payload: ApprovalPick[] = lines.map((line) => {
-        const offerId = picks[line.part_id];
-        return offerId
-          ? { part_id: line.part_id, offer_id: offerId, action: 'accept' as const }
+      const picks: ApprovalPick[] = lines.map((line) => {
+        const chosen = plan.choices.get(line.part_id);
+        return chosen
+          ? { part_id: line.part_id, offer_id: chosen.id, action: 'accept' as const }
           : { part_id: line.part_id, action: 'reject' as const };
       });
-      setResult(await approvePicks(token, payload));
+      setResult(await approvePicks(token, picks));
     });
   };
 
@@ -88,129 +131,108 @@ export function QuoteForm({ token, lines }: { token: string; lines: ApprovalLine
     return (
       <Card>
         <CardContent className="flex flex-col items-center gap-3 py-10 text-center">
-          <CheckCircle2 className="size-10 text-emerald-600" aria-hidden />
+          <CheckCircle2 className="size-10 text-success" aria-hidden />
           <p className="text-lg font-semibold">Thanks — your repairer has your answer.</p>
           <p className="text-sm text-muted-foreground">
-            {accepted} of {lines.length} parts approved.
+            {plan.title} · {formatPrice(plan.total)} · back with you around{' '}
+            {readyDate(plan.leadDays)}.
           </p>
         </CardContent>
       </Card>
     );
   }
 
-  // Group by kind, preserving the backend's ordering within each.
-  const kinds = ['visible', 'hidden'].filter((k) => lines.some((line) => line.kind === k));
-
   return (
-    <div className="flex flex-col gap-6">
-      {kinds.map((kind) => (
-        <section key={kind} className="flex flex-col gap-3">
-          <div>
-            <h2 className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
-              {KIND_LABEL[kind] ?? kind}
-            </h2>
-            {KIND_INTRO[kind] ? (
-              <p className="mt-1 text-xs text-muted-foreground">{KIND_INTRO[kind]}</p>
-            ) : null}
-          </div>
+    <div className="flex flex-col gap-4">
+      {plans.map((option) => {
+        const active = option.id === selected;
+        return (
+          <button
+            key={option.id}
+            type="button"
+            onClick={() => setSelected(option.id)}
+            aria-pressed={active}
+            className={`rounded-xl border p-4 text-left transition ${
+              active ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'border-border'
+            }`}
+          >
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="font-semibold">{option.title}</span>
+              <span className="text-lg font-semibold">{formatPrice(option.total)}</span>
+            </div>
 
-          {lines
-            .filter((line) => line.kind === kind)
-            .map((line) => (
-              <Card key={line.part_id}>
-                <CardContent className="flex flex-col gap-3 py-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="font-semibold">
-                        {line.display_name}
-                        {line.qty > 1 ? (
-                          <span className="ml-2 text-sm font-medium text-muted-foreground">
-                            ×{line.qty}
-                          </span>
-                        ) : null}
-                      </p>
-                      {line.part_number ? (
-                        <p className="truncate font-mono text-[11px] text-muted-foreground">
-                          {line.part_number.split(':').pop()}
-                        </p>
-                      ) : null}
-                    </div>
-                    {line.kind === 'visible' ? (
-                      <span className="shrink-0 text-[11px] uppercase tracking-wide text-muted-foreground">
-                        Detected
-                      </span>
-                    ) : (
-                      <Likelihood p={line.p} />
-                    )}
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              {option.total === cheapest ? <Badge variant="success">Lowest price</Badge> : null}
+              {option.leadDays === soonest ? <Badge variant="secondary">Back soonest</Badge> : null}
+              {option.genuineCount > 0 ? (
+                <Badge variant="secondary">
+                  {option.genuineCount} genuine part{option.genuineCount === 1 ? '' : 's'}
+                </Badge>
+              ) : null}
+            </div>
+
+            <p className="mt-2 text-sm text-muted-foreground">{option.blurb}</p>
+
+            <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-sm">
+              <span className="flex items-center gap-1.5 text-muted-foreground">
+                <Clock className="size-4 shrink-0" aria-hidden />
+                {option.leadDays === 0
+                  ? 'Parts in stock'
+                  : `Longest part takes ${option.leadDays} days`}
+              </span>
+              <span className="flex items-center gap-1.5 font-medium">
+                <Wrench className="size-4 shrink-0" aria-hidden />
+                Car ready ~{readyDate(option.leadDays)}
+              </span>
+            </div>
+          </button>
+        );
+      })}
+
+      <button
+        type="button"
+        onClick={() => setShowParts((open) => !open)}
+        className="self-start text-sm font-medium text-primary"
+      >
+        {showParts ? 'Hide the parts' : `See all ${plan.choices.size} parts`}
+      </button>
+
+      {showParts ? (
+        <Card>
+          <CardContent className="divide-y p-0">
+            {lines.map((line) => {
+              const chosen = plan.choices.get(line.part_id);
+              return (
+                <div key={line.part_id} className="flex items-start justify-between gap-3 p-4">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium">
+                      {line.qty > 1 ? `${line.qty}× ` : ''}
+                      {line.display_name}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {chosen ? `${chosen.label} · ${chosen.tier}` : 'No supplier available'}
+                    </p>
                   </div>
-
-                  <div className="flex flex-col gap-2">
-                    {line.options.map((option) => {
-                      const selected = picks[line.part_id] === option.id;
-                      return (
-                        <button
-                          key={option.id}
-                          type="button"
-                          onClick={() =>
-                            setPicks((prev) => ({ ...prev, [line.part_id]: option.id }))
-                          }
-                          aria-pressed={selected}
-                          className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-3 text-left transition ${
-                            selected ? 'border-primary bg-primary/5' : 'border-border'
-                          }`}
-                        >
-                          <span className="min-w-0">
-                            <span className="block text-sm font-medium">
-                              {option.label}
-                              <span className="ml-2 text-xs uppercase text-muted-foreground">
-                                {option.tier}
-                              </span>
-                            </span>
-                            <span className="block text-xs text-muted-foreground">
-                              {formatLeadTime(option.lead_days)} ·{' '}
-                              {option.in_stock ? 'in stock' : 'on back order'}
-                              {option.why ? ` · ${option.why}` : ''}
-                            </span>
-                          </span>
-                          <span className="shrink-0 text-sm font-semibold">
-                            {formatPrice(option.price_nzd)}
-                          </span>
-                        </button>
-                      );
-                    })}
-
-                    <button
-                      type="button"
-                      onClick={() => setPicks((prev) => ({ ...prev, [line.part_id]: null }))}
-                      aria-pressed={!picks[line.part_id]}
-                      className={`rounded-lg border px-3 py-2 text-left text-sm transition ${
-                        picks[line.part_id]
-                          ? 'border-border text-muted-foreground'
-                          : 'border-primary bg-primary/5 font-medium'
-                      }`}
-                    >
-                      Don&apos;t replace this part
-                    </button>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-        </section>
-      ))}
+                  <span className="shrink-0 text-sm">
+                    {chosen ? formatPrice(chosen.price_nzd * line.qty) : '—'}
+                  </span>
+                </div>
+              );
+            })}
+          </CardContent>
+        </Card>
+      ) : null}
 
       <div className="sticky bottom-0 flex flex-col gap-2 border-t bg-background py-4">
-        <div className="flex items-baseline justify-between">
-          <span className="text-sm text-muted-foreground">
-            {accepted} of {lines.length} parts
-          </span>
-          <span className="text-lg font-semibold">{formatPrice(total)}</span>
-        </div>
         {result && !result.ok ? (
           <p className="text-sm text-destructive">{result.message}</p>
         ) : null}
         <Button onClick={submit} disabled={pending} className="w-full">
-          {pending ? 'Sending…' : 'Approve these parts'}
+          {pending ? 'Sending…' : `Approve ${plan.title} — ${formatPrice(plan.total)}`}
         </Button>
+        <p className="text-center text-xs text-muted-foreground">
+          Your repairer confirms the final price before any work starts.
+        </p>
       </div>
     </div>
   );
