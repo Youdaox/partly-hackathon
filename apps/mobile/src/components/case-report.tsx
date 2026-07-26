@@ -14,6 +14,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Image } from 'expo-image';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -30,6 +31,7 @@ import { VehicleViewer } from '@/components/VehicleViewer/VehicleViewer';
 import { Radius, Spacing, TapTarget } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import type { ErrorInfo } from '@/hooks/use-case';
+import { diagramImageUrl } from '@/lib/backend';
 import type { CaseReport, ReportLine, VehiclePayload } from '@/lib/backend';
 import { regionsFromReport } from '@/lib/damage-regions';
 
@@ -203,12 +205,17 @@ export function CaseReportView({
   const theme = useTheme();
   const cascade = useCascade(report);
   const regions = useMemo(() => regionsFromReport(report), [report]);
+  /** Needed to address a diagram's image.webp (spec 6.1) — null until the vehicle resolves. */
+  const slug = vehicle?.slug ?? null;
 
   /**
    * Which group is expanded. Hidden damage on arrival: it is what the product is for, and
    * the only group with a decision attached to every row.
    */
   const [openSection, setOpenSection] = useState<SectionKey>('confirmed');
+
+  /** Dismissed by its own close button — stays dismissed for the rest of this view. */
+  const [insightDismissed, setInsightDismissed] = useState(false);
 
   /** The part currently glowing on the 3D car — set by tapping either the car or a card. */
   const [selectedMeshName, setSelectedMeshName] = useState<string | null>(null);
@@ -319,8 +326,9 @@ export function CaseReportView({
     line.klass ? meshForPart(line.klass, line.side ?? 'C', impactZone) : null;
 
   // The "AI sees what humans cannot" moment — surfaces the first time the AI-predicted
-  // tab is open and nothing is selected yet.
-  const showInsightBanner = !confirmedView && !selectedMeshName && activeRegions.length > 0;
+  // tab is open and nothing is selected yet, until closed.
+  const showInsightBanner =
+    !confirmedView && !selectedMeshName && activeRegions.length > 0 && !insightDismissed;
 
   return (
     <ScrollView contentContainerStyle={styles.list} keyboardShouldPersistTaps="handled">
@@ -364,11 +372,24 @@ export function CaseReportView({
 
         {showInsightBanner ? (
           <View style={styles.insightBanner}>
-            <View style={[styles.insightCard, { backgroundColor: theme.backgroundElement }]}>
-              <ThemedText type="smallBold">AI Insight</ThemedText>
-              <ThemedText type="small" themeColor="textSecondary">
-                The collision angle and bumper deformation indicate there may be damage behind
-                the visible impact area. Tap a glowing part to see why.
+            <View style={styles.insightCard}>
+              <View style={styles.insightHead}>
+                <ThemedText type="small" style={styles.insightTitle}>
+                  AI Insight
+                </ThemedText>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Dismiss AI insight"
+                  onPress={() => setInsightDismissed(true)}
+                  hitSlop={8}
+                  style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
+                >
+                  <Ionicons name="close" size={15} color="#F2F4F7" />
+                </Pressable>
+              </View>
+              <ThemedText type="small" style={styles.insightBody} numberOfLines={3}>
+                The collision angle and bumper deformation suggest damage behind the visible
+                impact area. Tap a glowing part to see why.
               </ThemedText>
             </View>
           </View>
@@ -522,10 +543,12 @@ export function CaseReportView({
               >
                 {/* Tapping the card is the other half of the sync: it highlights + focuses
                     this part on the 3D car above, same as tapping the part on the car itself
-                    selects this card. Only lines with a `klass` place onto the model at all. */}
+                    selects this card. Only lines with a `klass` place onto the model at all.
+                    No accessibilityRole here on purpose: this wraps its own Confirm/Reset/
+                    diagram buttons, and on web `role="button"` renders a real <button> —
+                    nesting one inside another is invalid HTML the browser refuses to build. */}
                 <Pressable
                   disabled={!meshName}
-                  accessibilityRole={meshName ? 'button' : undefined}
                   accessibilityLabel={meshName ? `Show ${line.name} on the 3D model` : undefined}
                   onPress={() => meshName && selectPart(meshName)}
                   style={({ pressed }) => [
@@ -622,15 +645,64 @@ export function CaseReportView({
                         hitSlop={8}
                         style={({ pressed }) => [
                           styles.confirmLink,
-                          { opacity: pressed ? 0.5 : 1 },
+                          { opacity: pressed ? 0.5 : 1, maxWidth: 140},
                         ]}
                       >
                         <ThemedText type="smallBold" style={{ color: theme.accent }}>
-                          Confirm
+                          Confirm damage
                         </ThemedText>
                         <Ionicons name="arrow-forward" size={14} color={theme.accent} />
                       </Pressable>
                     )}
+
+                    {/* The catalogue only ships image.webp for a fraction of diagrams
+                        (see `diagram_available` on ReportLine / _region_hint's twin in
+                        report_service.py) — nothing to toggle for the rest. */}
+                    {line.diagram_available && line.diagram_id && slug ? (
+                      <>
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={
+                            expanded === line.part_id
+                              ? `Hide exploded diagram for ${line.name}`
+                              : `Show exploded diagram for ${line.name}`
+                          }
+                          onPress={() =>
+                            onToggleExpanded(expanded === line.part_id ? null : line.part_id)
+                          }
+                          hitSlop={8}
+                          style={({ pressed }) => [
+                            styles.diagramToggle,
+                            { opacity: pressed ? 0.6 : 1 },
+                          ]}
+                        >
+                          <Ionicons
+                            name={expanded === line.part_id ? 'image' : 'image-outline'}
+                            size={14}
+                            color={theme.accent}
+                          />
+                          <ThemedText type="small" style={{ color: theme.accent }}>
+                            {expanded === line.part_id ? 'Hide diagram' : 'View diagram'}
+                          </ThemedText>
+                        </Pressable>
+
+                        {expanded === line.part_id ? (
+                          <View
+                            style={[
+                              styles.diagramFrame,
+                              { borderColor: theme.border, backgroundColor: theme.background },
+                            ]}
+                          >
+                            <Image
+                              source={{ uri: diagramImageUrl(slug, line.diagram_id) }}
+                              style={styles.diagramImage}
+                              contentFit="contain"
+                              transition={150}
+                            />
+                          </View>
+                        ) : null}
+                      </>
+                    ) : null}
                   </View>
                 </Pressable>
               </Animated.View>
@@ -755,8 +827,23 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   legendOverlay: { position: 'absolute', top: Spacing.two, left: Spacing.two },
-  insightBanner: { position: 'absolute', left: Spacing.two, right: Spacing.two, bottom: Spacing.two },
-  insightCard: { borderRadius: Radius.card, padding: Spacing.three, gap: Spacing.one },
+  // Anchored to a corner and capped narrow rather than stretched edge-to-edge — the
+  // point is a small nudge over the car, not a card that blocks half the view.
+  insightBanner: {
+    position: 'absolute',
+    left: Spacing.two,
+    bottom: Spacing.two,
+    maxWidth: '62%',
+  },
+  insightCard: {
+    borderRadius: Radius.card - 4,
+    padding: Spacing.two,
+    gap: 2,
+    backgroundColor: 'rgba(16, 20, 28, 0.72)',
+  },
+  insightHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.two },
+  insightTitle: { color: '#F2F4F7', fontWeight: '700' },
+  insightBody: { color: 'rgba(242, 244, 247, 0.82)', lineHeight: 18 },
 
   deltaRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one },
   newBadge: {
@@ -879,6 +966,21 @@ const styles = StyleSheet.create({
     gap: Spacing.one,
     minHeight: 28,
   },
+  diagramToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one,
+    marginTop: Spacing.two,
+    minHeight: 28,
+  },
+  diagramFrame: {
+    marginTop: Spacing.two,
+    height: 220,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.card - 4,
+    overflow: 'hidden',
+  },
+  diagramImage: { width: '100%', height: '100%' },
   rowRemove: {
     width: 32,
     height: 32,
