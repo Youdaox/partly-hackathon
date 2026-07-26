@@ -145,11 +145,12 @@ export function DamageOverlay({
             ref={materialRef}
             color={haloColor}
             emissive={haloColor}
+            emissiveIntensity={1}
+            toneMapped={false}
             transparent
             opacity={region?.confidence ?? 0.45}
             depthWrite={false}
             depthTest={false}
-            blending={THREE.AdditiveBlending}
           />
           <Edges color={haloColor} renderOrder={11} />
         </mesh>

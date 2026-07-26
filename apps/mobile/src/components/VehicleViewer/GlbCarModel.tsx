@@ -35,7 +35,13 @@ import { useGLTF } from '@react-three/drei';
 import type { ThreeEvent } from '@react-three/fiber';
 
 import type { DamageRegion } from '@/types/damage';
-import { MODEL_RECENTER, MODEL_ROTATION_Y, MODEL_SCALE, nearestExteriorMesh } from './carLayout';
+import {
+  MODEL_RECENTER,
+  MODEL_ROTATION_Y,
+  MODEL_SCALE,
+  exteriorMeshNames,
+  nearestExteriorMesh,
+} from './carLayout';
 import { PartOverlays } from './PartOverlays';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports -- Metro asset require, not a module import
@@ -58,19 +64,14 @@ export function GlbCarModel({
   const gltf = useGLTF(MODEL_SOURCE as never) as unknown as { scene: THREE.Object3D };
   const scene = useMemo(() => gltf.scene, [gltf]);
 
-  // Only highlighted parts are clickable, so they are the candidate set the
-  // nearest-point search resolves against — see nearestExteriorMesh's note on
-  // why restricting it is what makes "nearest" reliable.
-  const eligibleMeshNames = useMemo(
-    () => activeRegions.map((region) => region.meshName),
-    [activeRegions],
-  );
-
   const handleBodyPointerDown = (event: ThreeEvent<PointerEvent>) => {
     event.stopPropagation();
+    // Every exterior part is a valid tap target, not just currently-highlighted
+    // ones — this is a locate-a-part tool first (see this screen's own doc
+    // comment), so a tap has to be able to land on any part of the car.
     const meshName = nearestExteriorMesh(
       [event.point.x, event.point.y, event.point.z],
-      eligibleMeshNames,
+      exteriorMeshNames(),
     );
     if (meshName) onSelectPart(meshName);
   };

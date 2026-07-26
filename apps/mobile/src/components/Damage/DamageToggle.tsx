@@ -1,15 +1,17 @@
 /**
- * Visible / Invisible damage toggle row.
+ * Visible / AI-predicted damage toggle — the same "big number, label under it"
+ * stat-box language as the diagnosis report's filter pair (case-report.tsx), so
+ * this screen reads as the same app rather than a bolted-on viewer.
  *
  * Both are independent switches (not a segmented either/or) so a repairer can look at
- * visible and AI-inferred damage side by side. The invisible chip gets a slow
- * Reanimated glow pulse while active — the "AI is watching" cue for hidden damage.
+ * visible and AI-inferred damage side by side. Each box fills with its own halo colour
+ * when active — the same orange/purple the 3D viewer and the parts list use — so the
+ * toggle visibly explains what it's filtering rather than just being another navy tab.
  */
 
 import { useEffect } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, {
-  cancelAnimation,
   Easing,
   useAnimatedStyle,
   useSharedValue,
@@ -18,10 +20,15 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { ThemedText } from '@/components/themed-text';
-import { Spacing } from '@/constants/theme';
+import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
+const VISIBLE_COLOR = '#FF5A36';
+const INVISIBLE_COLOR = '#7C5CFF';
+
 interface DamageToggleProps {
+  visibleCount: number;
+  invisibleCount: number;
   showVisible: boolean;
   showInvisible: boolean;
   onToggleVisible: () => void;
@@ -29,6 +36,8 @@ interface DamageToggleProps {
 }
 
 export function DamageToggle({
+  visibleCount,
+  invisibleCount,
   showVisible,
   showInvisible,
   onToggleVisible,
@@ -36,77 +45,83 @@ export function DamageToggle({
 }: DamageToggleProps) {
   return (
     <View style={styles.row}>
-      <ToggleChip
-        label="Visible Damage"
+      <ToggleBox
+        label="Visible"
+        count={visibleCount}
         active={showVisible}
-        activeColor="#FF5A36"
+        color={VISIBLE_COLOR}
         onPress={onToggleVisible}
       />
-      <ToggleChip
-        label="Invisible Damage"
+      <ToggleBox
+        label="AI-predicted"
+        count={invisibleCount}
         active={showInvisible}
-        activeColor="#7C5CFF"
-        glow
+        color={INVISIBLE_COLOR}
+        pulse
         onPress={onToggleInvisible}
       />
     </View>
   );
 }
 
-function ToggleChip({
+function ToggleBox({
   label,
+  count,
   active,
-  activeColor,
+  color,
   onPress,
-  glow = false,
+  pulse = false,
 }: {
   label: string;
+  count: number;
   active: boolean;
-  activeColor: string;
+  color: string;
   onPress: () => void;
-  glow?: boolean;
+  pulse?: boolean;
 }) {
   const theme = useTheme();
-  const glowOpacity = useSharedValue(0);
+  const pulseValue = useSharedValue(0.4);
 
   useEffect(() => {
-    if (active && glow) {
-      glowOpacity.value = withRepeat(
-        withTiming(1, { duration: 900, easing: Easing.inOut(Easing.sin) }),
+    if (pulse && active) {
+      pulseValue.value = withRepeat(
+        withTiming(1, { duration: 800, easing: Easing.inOut(Easing.sin) }),
         -1,
         true,
       );
     } else {
-      cancelAnimation(glowOpacity);
-      glowOpacity.value = withTiming(0, { duration: 200 });
+      pulseValue.value = 0.4;
     }
-  }, [active, glow, glowOpacity]);
+  }, [pulse, active, pulseValue]);
 
-  const glowStyle = useAnimatedStyle(() => ({
-    opacity: glowOpacity.value * 0.35,
-  }));
+  const dotStyle = useAnimatedStyle(() => ({ opacity: pulseValue.value }));
 
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
       accessibilityState={{ selected: active }}
+      accessibilityLabel={`${label}, ${count} parts`}
       style={({ pressed }) => [
-        styles.chip,
+        styles.box,
         {
-          backgroundColor: active ? activeColor : theme.backgroundElement,
-          borderColor: active ? activeColor : theme.border,
-          opacity: pressed ? 0.8 : 1,
+          borderColor: active ? color : theme.border,
+          backgroundColor: active ? color : theme.backgroundElement,
+          transform: [{ scale: pressed ? 0.97 : 1 }],
         },
       ]}
     >
-      {glow ? (
-        <Animated.View
-          pointerEvents="none"
-          style={[styles.glow, glowStyle, { backgroundColor: activeColor }]}
-        />
-      ) : null}
-      <ThemedText type="smallBold" style={{ color: active ? '#fff' : theme.text }}>
+      <View style={styles.boxHead}>
+        <ThemedText type="heading" style={[styles.count, { color: active ? '#FFFFFF' : theme.text }]}>
+          {count}
+        </ThemedText>
+        {pulse ? (
+          <Animated.View
+            style={[styles.dot, dotStyle, { backgroundColor: active ? '#FFFFFF' : color }]}
+          />
+        ) : null}
+      </View>
+      <ThemedText type="smallBold" style={{ color: active ? '#FFFFFF' : theme.textSecondary }}>
         {label}
       </ThemedText>
     </Pressable>
@@ -115,18 +130,15 @@ function ToggleChip({
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', gap: Spacing.two },
-  chip: {
+  box: {
     flex: 1,
-    paddingVertical: Spacing.two,
-    paddingHorizontal: Spacing.three,
-    borderRadius: Spacing.three,
+    gap: Spacing.one,
     borderWidth: StyleSheet.hairlineWidth,
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
+    borderRadius: Radius.card,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.three,
   },
-  glow: {
-    ...StyleSheet.absoluteFill,
-    borderRadius: Spacing.three,
-  },
+  boxHead: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one },
+  count: { fontSize: 28, lineHeight: 32 },
+  dot: { width: 8, height: 8, borderRadius: 4 },
 });

@@ -41,6 +41,21 @@ def _line(part: Part, prediction: Prediction, qty: int, slug: str | None = None)
     return line
 
 
+def _region_hint(part: Part) -> dict:
+    """Already tagged on every part at load time (catalogue/tagger.py) — exposed on
+    top-level lines only, so a client can place a part on something physical (a 3D
+    region, a zone map) without re-guessing it from the display name.
+
+    `zone` is left off: it is redundant with the report's own `impact.zone` for
+    all but a handful of klasses (front vs rear bumper hardware), which a client
+    can default to the impact zone for. Left off hardware and consumable lines
+    entirely: those can number in the dozens per case and the client never needs
+    to place a clip on the model, so adding two fields to each would burn a real
+    chunk of the 20 KB payload cap (spec 6.8) for no reader.
+    """
+    return {"side": part.side, "klass": part.klass}
+
+
 def _attribution(prediction: Prediction) -> list[dict]:
     """The causes behind one probability, strongest first."""
     return [
@@ -109,6 +124,7 @@ def build(
     visible_lines = []
     for part, prediction, qty in _rows(sections.visible, catalogue, quantity):
         line = _line(part, prediction, qty, slug)
+        line.update(_region_hint(part))
         line["hardware"] = hardware_for(part)
         visible_lines.append(line)
     payload["sections"]["visible"] = visible_lines
@@ -116,6 +132,7 @@ def build(
     order_lines = []
     for part, prediction, qty in _rows(sections.order, catalogue, quantity):
         line = _line(part, prediction, qty, slug)
+        line.update(_region_hint(part))
         line["reason"] = prediction.reason
         line["hardware"] = hardware_for(part)
         # The decomposition behind `reason`, so the client can show the whole
@@ -135,6 +152,7 @@ def build(
     check_lines = []
     for part, prediction, qty in _rows(sections.check, catalogue, quantity):
         line = _line(part, prediction, qty, slug)
+        line.update(_region_hint(part))
         line["reason"] = prediction.reason
         line["confirmed"] = case.confirmations.get(part.part_id)
         inspection = inspections.get(part.part_id)
@@ -216,6 +234,7 @@ def _raised_question(case: Case, catalogue: Catalogue) -> dict | None:
 def vehicle_payload(vehicle: Vehicle) -> dict:
     return {
         "vehicle_id": vehicle.id,
+        "slug": vehicle.slug,
         "status": vehicle.status,
         "rego": vehicle.rego,
         "vin": vehicle.vin,

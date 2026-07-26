@@ -1,5 +1,6 @@
 import { DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { Colors } from '@/constants/theme';
 import '@/global.css';
@@ -22,30 +23,26 @@ const navigationTheme = {
 
 export default function RootLayout() {
   return (
-    <ThemeProvider value={navigationTheme}>
-      <StatusBar style="dark" />
-      <Stack
-        screenOptions={{
-          headerShadowVisible: false,
-          headerTintColor: Colors.light.accent,
-          headerTitleStyle: { color: Colors.light.text, fontWeight: '700' },
-          headerStyle: { backgroundColor: Colors.light.background },
-          contentStyle: { backgroundColor: Colors.light.background },
-        }}
-      >
-        {/* index and job/[id]/hidden set their own headers, so they can wire the
-            hamburger and the re-run action to screen state. */}
-        <Stack.Screen name="index" options={{ title: 'Partli' }} />
-        <Stack.Screen name="case/[id]" options={{ title: 'Diagnosis' }} />
-        {/* Without these two the header falls back to printing the route path. */}
-        <Stack.Screen name="case/[id]/send" options={{ title: 'Send to customer' }} />
-        <Stack.Screen name="case/[id]/inspection" options={{ title: '3D inspection' }} />
-        {/* Legacy: the jobs API flow on apps/api. Superseded by case/[id]. */}
-        <Stack.Screen name="job/[id]/capture" options={{ title: 'Live capture' }} />
-        <Stack.Screen name="job/[id]/hidden" options={{ title: 'Diagnosis' }} />
-        <Stack.Screen name="job/[id]/inspection" options={{ title: 'AI damage inspection' }} />
-        <Stack.Screen name="job/[id]/send" options={{ title: 'Send to customer' }} />
-      </Stack>
-    </ThemeProvider>
+    <SafeAreaProvider>
+      <ThemeProvider value={navigationTheme}>
+        <StatusBar style="dark" />
+        <Stack
+          screenOptions={{
+            headerShadowVisible: false,
+            headerTintColor: Colors.light.accent,
+            headerTitleStyle: { color: Colors.light.text, fontWeight: '700' },
+            headerStyle: { backgroundColor: Colors.light.background },
+            contentStyle: { backgroundColor: Colors.light.background },
+          }}
+        >
+          {/* index sets its own header, so it can wire the hamburger to screen state.
+              Without these two the header falls back to printing the route path. */}
+          <Stack.Screen name="index" options={{ title: 'Partli' }} />
+          <Stack.Screen name="case/[id]" options={{ title: 'Diagnosis' }} />
+          <Stack.Screen name="case/[id]/send" options={{ title: 'Send to customer' }} />
+          <Stack.Screen name="case/[id]/inspection" options={{ title: '3D inspection' }} />
+        </Stack>
+      </ThemeProvider>
+    </SafeAreaProvider>
   );
 }

@@ -337,6 +337,151 @@ export function findWheelLayout(meshName: string): WheelLayout | undefined {
   return WHEEL_LAYOUT.find((wheel) => wheel.meshName === meshName);
 }
 
+// ---------------------------------------------------------------------------
+// Real-catalogue parts -> mesh region
+// ---------------------------------------------------------------------------
+//
+// The report's ~50 klasses (backend/app/tables/klass_rules.py) are far finer-
+// grained than this file's ~20 hand-placed regions, so several real parts always
+// land on one mesh — that is the point, not a loss: "Right Headlamp Assembly",
+// "Radiator Support Headlamp Bracket - Right" and "Right Headlight Wiring
+// Harness Connector" are all things a repairer would call "the right headlamp
+// area" when locating them on the car. `klass` alone resolves most of the map;
+// `side` breaks the left/right tie; and a handful of klasses that can legally
+// sit at either end of the car (mainly bumper hardware) fall back to the case's
+// own impact zone, since the report only ever surfaces a part near where the
+// hit happened.
+//
+// A few placements are frank approximations rather than a real mapping, called
+// out inline — this screen locates damage in the right *area* of the car, it
+// does not model which of two rear doors a wiring harness clip belongs to.
+
+function sideMesh(side: string, left: string, right: string, fallback: string): string {
+  if (side === 'L') return left;
+  if (side === 'R') return right;
+  return fallback;
+}
+
+/** Front/rear bumper hardware — the one family that genuinely needs the impact zone to place. */
+const BUMPER_KLASSES = new Set([
+  'bumper_cover',
+  'cover_retainer',
+  'seal',
+  'moulding',
+  'grille',
+  'emblem',
+  'splash_shield',
+  'mudflap',
+  'bumper_absorber',
+  'reinforcement_beam',
+  'undercover',
+  'washer_nozzle',
+  'washer_tank',
+  'horn',
+]);
+
+/** Klasses with no case-specific side/zone info at all — always the same mesh. */
+const FIXED_MESH: Record<string, string> = {
+  bonnet: 'Hood',
+  bonnet_hinge: 'Hood',
+  bonnet_latch: 'Hood',
+  windscreen: 'Windscreen',
+  sensor: 'Sensors',
+  // Cooling pack: distinct parts, one hidden region behind the grille.
+  radiator: 'RadiatorSupport',
+  radiator_support: 'RadiatorSupport',
+  condenser: 'RadiatorSupport',
+  cooling_fan: 'RadiatorSupport',
+  coolant_reservoir: 'RadiatorSupport',
+  // Engine-bay electrics — no dedicated mesh per component, so these share the
+  // one hidden engine region rather than each inventing a placement.
+  harness: 'Engine',
+  ecu: 'Engine',
+  firewall: 'Engine',
+  steering_rack: 'Engine',
+  engine_mount: 'Engine',
+  // Structural rail/crash-path parts: the only hidden structural mesh this
+  // layout has is the front crash bar, so rear-zone structure approximates onto
+  // the rear bumper's hidden hardware instead of inventing a rear mesh.
+  crash_box: 'CrashBar',
+  side_member: 'CrashBar',
+  subframe: 'CrashBar',
+};
+
+/** Klasses that pick a left/right mesh with no zone ambiguity (the klass itself implies front or rear). */
+const SIDE_MESH: Record<string, { left: string; right: string; fallback: string }> = {
+  lamp_bracket: { left: 'LeftHeadlight', right: 'RightHeadlight', fallback: 'RadiatorSupport' },
+  headlamp: { left: 'LeftHeadlight', right: 'RightHeadlight', fallback: 'RadiatorSupport' },
+  fog_lamp: { left: 'LeftHeadlight', right: 'RightHeadlight', fallback: 'FrontBumper' },
+  tail_lamp: { left: 'LeftTaillight', right: 'RightTaillight', fallback: 'RearBumper' },
+  // No separate rear-guard mesh in this layout, so quarter panels land on the
+  // front fender of the same side.
+  fender: { left: 'LeftFender', right: 'RightFender', fallback: 'FrontBumper' },
+  fender_liner: { left: 'LeftFender', right: 'RightFender', fallback: 'FrontBumper' },
+  apron: { left: 'LeftFender', right: 'RightFender', fallback: 'FrontBumper' },
+  strut_tower: { left: 'LeftFender', right: 'RightFender', fallback: 'FrontBumper' },
+  // Not distinguished front/rear door by klass alone — approximates to front.
+  door_panel: { left: 'LeftFrontDoor', right: 'RightFrontDoor', fallback: 'LeftFrontDoor' },
+  mirror: { left: 'LeftFrontDoor', right: 'RightFrontDoor', fallback: 'LeftFrontDoor' },
+  // Cabin safety system: no interior mesh exists, so it locates to the nearest door.
+  airbag_module: { left: 'LeftFrontDoor', right: 'RightFrontDoor', fallback: 'Roof' },
+};
+
+/** Suspension/driveline klasses: a wheel corner, picked from side + the case's impact zone. */
+const WHEEL_KLASSES = new Set([
+  'suspension_arm',
+  'steering_knuckle',
+  'wheel_hub',
+  'drive_shaft',
+  'brake_disc',
+]);
+
+/**
+ * Where one real catalogue part belongs on the 3D model.
+ *
+ * `impactZone` is the case's overall `impact.zone` (front/rear/left/right/other)
+ * — the report never surfaces a part far from where the hit happened, so it is a
+ * safe stand-in for the per-part zone the API leaves out to stay under its size
+ * budget (see `_region_hint` in `report_service.py`).
+ */
+export function meshForPart(klass: string, side: string, impactZone: string): string {
+  const fixed = FIXED_MESH[klass];
+  if (fixed) return fixed;
+
+  const sided = SIDE_MESH[klass];
+  if (sided) return sideMesh(side, sided.left, sided.right, sided.fallback);
+
+  if (WHEEL_KLASSES.has(klass)) {
+    const rear = impactZone === 'rear';
+    return sideMesh(
+      side,
+      rear ? 'LeftRearWheel' : 'LeftFrontWheel',
+      rear ? 'RightRearWheel' : 'RightFrontWheel',
+      rear ? 'LeftRearWheel' : 'LeftFrontWheel',
+    );
+  }
+
+  if (BUMPER_KLASSES.has(klass) || klass === 'bracket') {
+    return impactZone === 'rear' ? 'RearBumper' : 'FrontBumper';
+  }
+
+  // Unrecognised klass — place it somewhere plausible rather than dropping it.
+  // Every klass `klass_rules.py` produces today is covered above; this only
+  // guards against the table growing without this map growing with it.
+  switch (impactZone) {
+    case 'rear':
+      return 'RearBumper';
+    case 'left':
+      return sideMesh(side, 'LeftFrontDoor', 'RightFrontDoor', 'LeftFrontDoor');
+    case 'right':
+      return sideMesh(side, 'LeftFrontDoor', 'RightFrontDoor', 'RightFrontDoor');
+    case 'other':
+      return 'Roof';
+    default:
+      return sideMesh(side, 'LeftFender', 'RightFender', 'FrontBumper');
+  }
+}
+
 /** Display label for any locatable mesh, part or wheel. Falls back to the raw name. */
 export function labelForMesh(meshName: string): string {
   return findPartLayout(meshName)?.label ?? findWheelLayout(meshName)?.label ?? meshName;
@@ -349,6 +494,21 @@ export function positionForMesh(meshName: string): [number, number, number] {
   const wheel = findWheelLayout(meshName);
   if (wheel) return wheel.position;
   return [0, 0.4, 0];
+}
+
+/**
+ * Every part a tap on the real GLB body surface is allowed to resolve to —
+ * every non-hidden panel plus the wheels. This is a locate-a-part tool first
+ * (see InspectionViewerScreen's own doc comment): a tap should be able to land
+ * on any exterior part, not only ones currently carrying an active region, so
+ * GlbCarModel passes this whole set to `nearestExteriorMesh` rather than
+ * narrowing it to whatever's highlighted.
+ */
+export function exteriorMeshNames(): string[] {
+  return [
+    ...PART_LAYOUT.filter((part) => !part.hidden).map((part) => part.meshName),
+    ...WHEEL_LAYOUT.map((wheel) => wheel.meshName),
+  ];
 }
 
 function distanceSquared(a: [number, number, number], b: [number, number, number]): number {

@@ -1,5 +1,9 @@
 /**
- * Small colour-key row explaining the two overlay styles on the 3D viewer.
+ * Small colour-key chip explaining the two overlay styles on the 3D viewer.
+ *
+ * Floats over the dark stage, so it carries its own dark translucent backing and
+ * light text rather than following the page theme — it needs to read the same
+ * regardless of what part of the car is behind it.
  */
 
 import { useEffect } from 'react';
@@ -13,7 +17,7 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { ThemedText } from '@/components/themed-text';
-import { Spacing } from '@/constants/theme';
+import { Radius, Spacing } from '@/constants/theme';
 
 export function DamageLegend() {
   const pulse = useSharedValue(0.4);
@@ -29,17 +33,17 @@ export function DamageLegend() {
   const invisibleDotStyle = useAnimatedStyle(() => ({ opacity: pulse.value }));
 
   return (
-    <View style={styles.row}>
+    <View style={styles.card}>
       <View style={styles.item}>
         <View style={[styles.dot, { backgroundColor: '#FF5A36' }]} />
-        <ThemedText type="small" themeColor="textSecondary">
-          Visible damage
+        <ThemedText type="small" style={styles.label}>
+          Visible
         </ThemedText>
       </View>
       <View style={styles.item}>
         <Animated.View style={[styles.dot, { backgroundColor: '#7C5CFF' }, invisibleDotStyle]} />
-        <ThemedText type="small" themeColor="textSecondary">
-          AI-predicted (hidden)
+        <ThemedText type="small" style={styles.label}>
+          AI-predicted
         </ThemedText>
       </View>
     </View>
@@ -47,7 +51,15 @@ export function DamageLegend() {
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', gap: Spacing.four },
+  card: {
+    flexDirection: 'row',
+    gap: Spacing.three,
+    backgroundColor: 'rgba(10,14,20,0.55)',
+    borderRadius: Radius.round,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
+  },
   item: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one },
-  dot: { width: 10, height: 10, borderRadius: 5 },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+  label: { color: '#F2F4F7' },
 });

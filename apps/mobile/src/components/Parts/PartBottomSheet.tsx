@@ -3,9 +3,14 @@
  *
  * This is a locate-a-part tool first, a damage viewer second: tapping an
  * undamaged part (most of them, most of the time) still opens the sheet, just
- * with a short "no damage reported" version instead of the full AI writeup —
+ * with a short "no damage reported" version instead of a parts list —
  * naming and finding a part is the baseline, damage detail is what's layered on
  * top when there's something to say.
+ *
+ * A region groups every real catalogue part that mapped onto this mesh (see
+ * `lib/damage-regions.ts`), so the sheet's real content is that list — each row
+ * is one actual part, tappable through to its own exploded diagram, rather than
+ * one description for the whole area.
  *
  * Deliberately a hand-rolled Modal + Reanimated slide rather than a bottom-sheet
  * library — this app has no such dependency yet and the interaction here (open,
@@ -13,27 +18,29 @@
  */
 
 import { useEffect } from 'react';
-import { Dimensions, Modal, Pressable, StyleSheet, View } from 'react-native';
+import { Dimensions, FlatList, Modal, Pressable, StyleSheet, View } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import { Ionicons } from '@expo/vector-icons';
 
 import { ThemedText } from '@/components/themed-text';
-import { Button, ConfidenceBar, Pill } from '@/components/ui';
-import { Spacing } from '@/constants/theme';
+import { MatchBadge, Pill } from '@/components/ui';
+import { Spacing, TapTarget } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import type { DamageRegion } from '@/types/damage';
+import type { DamageRegion, RegionPart } from '@/types/damage';
 
-const SHEET_HEIGHT = Math.min(Dimensions.get('window').height * 0.6, 520);
+const SHEET_HEIGHT = Math.min(Dimensions.get('window').height * 0.62, 560);
 
 interface PartBottomSheetProps {
   /** The part that was tapped — null when nothing is selected (sheet stays hidden). */
   meshName: string | null;
   /** Display label for `meshName`, shown whether or not there's a DamageRegion. */
   label: string;
-  /** Present only when the AI has something to say about this part. */
+  /** Present only when real report parts mapped onto this mesh. */
   region: DamageRegion | null;
   visible: boolean;
   onClose: () => void;
-  onViewDiagram: () => void;
+  /** Open the exploded diagram for one specific real part. */
+  onSelectPart: (part: RegionPart) => void;
 }
 
 export function PartBottomSheet({
@@ -42,7 +49,7 @@ export function PartBottomSheet({
   region,
   visible,
   onClose,
-  onViewDiagram,
+  onSelectPart,
 }: PartBottomSheetProps) {
   const theme = useTheme();
   const translateY = useSharedValue(SHEET_HEIGHT);
@@ -75,51 +82,21 @@ export function PartBottomSheet({
           </ThemedText>
           {region ? (
             <Pill
-              label={region.damageType === 'visible' ? 'Visible' : 'AI-predicted'}
+              label={`${region.parts.length} part${region.parts.length === 1 ? '' : 's'}`}
               tone={region.damageType === 'visible' ? 'accent' : 'neutral'}
             />
           ) : null}
         </View>
 
         {region ? (
-          <>
-            <Section label="Damage">
-              <ThemedText type="default">{region.description}</ThemedText>
-            </Section>
-
-            {/* Observed = no number, predicted = number. A part Partly saw in
-                the photo is a fact, and a percentage beside it reads as
-                hedging about something not in doubt. DamageCard, the parts
-                list and the web quote all follow this; the rule was lost here
-                in a merge and is restored rather than dropped everywhere else. */}
-            {region.damageType === 'invisible' ? (
-              <Section label="Likelihood">
-                <ConfidenceBar value={region.confidence} />
-              </Section>
-            ) : (
-              <Section label="Status">
-                <ThemedText type="default">Detected in the photos by Partly</ThemedText>
-              </Section>
+          <FlatList
+            data={region.parts}
+            keyExtractor={(part) => part.partId}
+            contentContainerStyle={styles.list}
+            renderItem={({ item }) => (
+              <PartRow part={item} onPress={() => onSelectPart(item)} />
             )}
-
-            <Section label="AI Insight">
-              <View style={[styles.insightCard, { backgroundColor: theme.backgroundElement }]}>
-                <ThemedText type="small">{region.explanation}</ThemedText>
-              </View>
-            </Section>
-
-            <Section label="Related parts">
-              <View style={styles.chipsRow}>
-                {region.parts.map((part) => (
-                  <View key={part} style={[styles.partChip, { backgroundColor: theme.backgroundSelected }]}>
-                    <ThemedText type="small">{part}</ThemedText>
-                  </View>
-                ))}
-              </View>
-            </Section>
-
-            <Button title="View exploded diagram" onPress={onViewDiagram} variant="secondary" fullWidth />
-          </>
+          />
         ) : (
           <ThemedText type="small" themeColor="textSecondary">
             No damage reported for this part.
@@ -130,15 +107,56 @@ export function PartBottomSheet({
   );
 }
 
-function Section({ label, children }: { label: string; children: React.ReactNode }) {
+/** One real catalogue part — name, its status, and a way into its exploded diagram. */
+function PartRow({ part, onPress }: { part: RegionPart; onPress: () => void }) {
+  const theme = useTheme();
+
   return (
-    <View style={styles.section}>
-      <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
-        {label.toUpperCase()}
-      </ThemedText>
-      {children}
-    </View>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`View ${part.name} exploded diagram`}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.row,
+        { borderColor: theme.border, opacity: pressed ? 0.6 : 1 },
+      ]}
+    >
+      <View style={styles.rowMain}>
+        <View style={styles.rowNameLine}>
+          <ThemedText type="smallBold" style={styles.rowName} numberOfLines={2}>
+            {part.name}
+            {part.qty > 1 ? ` ×${part.qty}` : ''}
+          </ThemedText>
+          <PartStatus part={part} />
+        </View>
+        {part.reason ? (
+          <ThemedText type="small" themeColor="textSecondary" numberOfLines={2}>
+            {part.reason}
+          </ThemedText>
+        ) : null}
+      </View>
+      <Ionicons name="chevron-forward" size={18} color={theme.iconMuted} />
+    </Pressable>
   );
+}
+
+/** Visible = a stated fact, no number. Predicted = a match badge. Inspected = settled. */
+function PartStatus({ part }: { part: RegionPart }) {
+  const theme = useTheme();
+
+  if (part.confirmed != null) {
+    return (
+      <Ionicons
+        name={part.confirmed ? 'checkmark-circle' : 'close-circle-outline'}
+        size={18}
+        color={part.confirmed ? theme.success : theme.textSecondary}
+      />
+    );
+  }
+  if (part.bucket === 'visible') {
+    return <Ionicons name="checkmark" size={18} color={theme.textSecondary} />;
+  }
+  return <MatchBadge value={part.p} />;
 }
 
 const styles = StyleSheet.create({
@@ -164,9 +182,16 @@ const styles = StyleSheet.create({
   },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.two },
   headerTitle: { flex: 1, fontSize: 22, lineHeight: 28 },
-  section: { gap: Spacing.one },
-  sectionLabel: { letterSpacing: 0.5 },
-  insightCard: { borderRadius: Spacing.two, padding: Spacing.three },
-  chipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.one },
-  partChip: { paddingHorizontal: Spacing.two, paddingVertical: Spacing.half, borderRadius: Spacing.four },
+  list: { gap: Spacing.one, paddingBottom: Spacing.three },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    minHeight: TapTarget,
+    paddingVertical: Spacing.two,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  rowMain: { flex: 1, gap: 2 },
+  rowNameLine: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  rowName: { flex: 1 },
 });
