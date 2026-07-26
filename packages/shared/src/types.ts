@@ -64,6 +64,8 @@ export interface VehicleSummary {
 /** The resolved vehicle behind a case. */
 export interface Vehicle {
   vehicle_id: string;
+  /** The `data/vehicles/<slug>` folder name — needed to address that vehicle's diagram images. */
+  slug: VehicleSlug | null;
   status: VehicleStatus;
   rego: Rego;
   vin: string | null;
@@ -193,6 +195,15 @@ export interface ReportLine {
   diagram_available?: boolean;
   /** `[x1, y1, x2, y2]` on the diagram image. */
   hotspot?: [number, number, number, number];
+  /**
+   * Catalogue tags carried on top-level lines only (not hardware/consumables) —
+   * enough for a client to place the part on something physical, e.g. a region
+   * of a 3D model, without re-guessing it from the display name. `zone` is not
+   * included; it is redundant with the report's own `impact.zone` for all but a
+   * handful of klasses, which a client can default to the impact zone for.
+   */
+  side?: Side;
+  klass?: string;
   /** null = not yet inspected. */
   confirmed?: boolean | null;
   inspection_rank?: number;
