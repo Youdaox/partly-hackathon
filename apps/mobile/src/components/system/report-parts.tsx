@@ -10,6 +10,8 @@
  */
 
 import { Pressable, StyleSheet, View } from 'react-native';
+import { Image } from 'expo-image';
+import { Ionicons } from '@expo/vector-icons';
 
 import { ThemedText } from '@/components/themed-text';
 import { Faces, Intake, Round, TapTarget } from '@/constants/theme';
@@ -93,6 +95,16 @@ export interface PartCardProps {
   busy?: boolean;
   /** Tints the card when the last answer moved this row. */
   moved?: boolean;
+  /**
+   * The exploded diagram for this part, when the catalogue ships one.
+   *
+   * Only a fraction of diagrams have an `image.webp` — `diagram_available` on
+   * the report line says which — so the toggle appears only where there is
+   * something behind it.
+   */
+  diagramUrl?: string | null;
+  diagramOpen?: boolean;
+  onToggleDiagram?: () => void;
 }
 
 export function PartCard({
@@ -103,6 +115,9 @@ export function PartCard({
   onConfirm,
   busy,
   moved,
+  diagramUrl,
+  diagramOpen,
+  onToggleDiagram,
 }: PartCardProps) {
   return (
     <View
@@ -148,11 +163,48 @@ export function PartCard({
                   { opacity: pressed || busy ? 0.6 : 1 },
                 ]}
               >
-                <ThemedText style={styles.confirmText}>Confirm →</ThemedText>
+                <ThemedText style={styles.confirmText}>Confirm damage →</ThemedText>
               </Pressable>
             ) : null}
           </>
         )}
+
+        {diagramUrl && onToggleDiagram ? (
+          <>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={
+                diagramOpen
+                  ? `Hide exploded diagram for ${name}`
+                  : `Show exploded diagram for ${name}`
+              }
+              onPress={onToggleDiagram}
+              hitSlop={10}
+              style={({ pressed }) => [styles.diagramToggle, { opacity: pressed ? 0.6 : 1 }]}
+            >
+              <Ionicons
+                name={diagramOpen ? 'image' : 'image-outline'}
+                size={14}
+                color={Intake.accent}
+              />
+              <ThemedText style={styles.diagramToggleText}>
+                {diagramOpen ? 'Hide diagram' : 'View diagram'}
+              </ThemedText>
+            </Pressable>
+
+            {diagramOpen ? (
+              <View style={styles.diagramFrame}>
+                <Image
+                  source={{ uri: diagramUrl }}
+                  style={styles.diagramImage}
+                  contentFit="contain"
+                  transition={150}
+                  accessibilityLabel={`Exploded diagram for ${name}`}
+                />
+              </View>
+            ) : null}
+          </>
+        ) : null}
       </View>
     </View>
   );
@@ -246,8 +298,26 @@ const styles = StyleSheet.create({
   cardName: { fontFamily: Faces.sansMedium, fontSize: 14, lineHeight: 17.5, color: Intake.ink },
   cardMeta: { fontFamily: Faces.sans, fontSize: 11.5, color: Intake.mutedLabel },
   verified: { fontFamily: Faces.sans, fontSize: 12, color: Intake.secondary },
-  confirmLink: { minHeight: 28, justifyContent: 'center' },
+  // Capped so a long label does not stretch the tap target the width of the card.
+  confirmLink: { minHeight: 28, maxWidth: 160, justifyContent: 'center' },
   confirmText: { fontFamily: Faces.sansMedium, fontSize: 12.5, color: Intake.accent },
+  diagramToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    minHeight: 28,
+    maxWidth: 160,
+  },
+  diagramToggleText: { fontFamily: Faces.sansMedium, fontSize: 12.5, color: Intake.accent },
+  diagramFrame: {
+    marginTop: 4,
+    borderWidth: 1,
+    borderColor: Intake.ruleFooter,
+    borderRadius: Round.card,
+    backgroundColor: Intake.page,
+    overflow: 'hidden',
+  },
+  diagramImage: { width: '100%', height: 180 },
 
   question: {
     borderLeftWidth: 2.5,

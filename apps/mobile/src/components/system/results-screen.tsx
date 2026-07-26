@@ -23,6 +23,7 @@ import { ScrollView, StyleSheet, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { ErrorNotice, Loading } from '@/components/ui';
 import { Faces, Intake } from '@/constants/theme';
+import { diagramImageUrl } from '@/lib/backend';
 import { regionsFromReport } from '@/lib/damage-regions';
 import type { CaseReport, ReportLine, VehiclePayload } from '@/lib/backend';
 import type { ErrorInfo } from '@/hooks/use-case';
@@ -94,6 +95,8 @@ export function ResultsScreen({
 }: ResultsScreenProps) {
   const [tab, setTab] = useState<TabKey>('predicted');
   const [selectedMesh, setSelectedMesh] = useState<string | null>(null);
+  /** One diagram open at a time — two 180px images at once buries the list. */
+  const [openDiagram, setOpenDiagram] = useState<string | null>(null);
 
   const regions = useMemo(() => regionsFromReport(report), [report]);
 
@@ -164,6 +167,7 @@ export function ResultsScreen({
           showInvisible={tab === 'predicted'}
           selectedMeshName={selectedMesh}
           onSelectPart={setSelectedMesh}
+          showInsight={tab === 'predicted'}
         />
 
         <SegmentedTabs
@@ -209,6 +213,17 @@ export function ResultsScreen({
               confirmed={line.confirmed != null || tab === 'confirmed'}
               busy={busyId === line.part_id}
               onConfirm={tab === 'confirmed' ? undefined : () => onConfirm(line.part_id, true)}
+              // Only a fraction of diagrams ship an image; the rest have no
+              // toggle rather than a toggle that opens nothing.
+              diagramUrl={
+                line.diagram_available && line.diagram_id && vehicle?.slug
+                  ? diagramImageUrl(vehicle.slug, line.diagram_id)
+                  : null
+              }
+              diagramOpen={openDiagram === line.part_id}
+              onToggleDiagram={() =>
+                setOpenDiagram((current) => (current === line.part_id ? null : line.part_id))
+              }
             />
           ))
         )}
