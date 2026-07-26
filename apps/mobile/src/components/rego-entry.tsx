@@ -21,6 +21,7 @@
 
 import { useCallback, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
+import { Image } from 'expo-image';
 import { Composer } from '@/components/composer';
 import { ThemedText } from '@/components/themed-text';
 import { SuggestionRow } from '@/components/ui';
@@ -72,6 +73,15 @@ export function RegoEntry({ onRegistered }: RegoEntryProps) {
   return (
     <ScrollView contentContainerStyle={styles.heroScroll} keyboardShouldPersistTaps="handled">
       <View style={styles.hero}>
+        {/* Transparent PNG, so it sits on the grey page without a white card behind it.
+            Width-driven with a fixed aspect ratio — the source is 403×156. */}
+        <Image
+          source={require('@/assets/images/partli-wordmark.png')}
+          style={styles.wordmark}
+          contentFit="contain"
+          accessibilityLabel="Partli"
+        />
+
         <ThemedText type="heading" style={styles.heading}>
           Enter the rego to start.
         </ThemedText>
@@ -136,6 +146,15 @@ const styles = StyleSheet.create({
   // Matches the hero the app already used, so screen 1 reads as the same app.
   heroScroll: { flexGrow: 1, justifyContent: 'center', padding: Spacing.three },
   hero: { width: '100%', maxWidth: 720, alignSelf: 'center' },
+  // 403x156 source. Width-driven so it scales with the hero, capped so it stays a
+  // wordmark rather than a banner.
+  wordmark: {
+    width: '58%',
+    maxWidth: 220,
+    aspectRatio: 403 / 156,
+    alignSelf: 'center',
+    marginBottom: Spacing.four,
+  },
   heading: { textAlign: 'center', marginBottom: Spacing.four },
   suggestions: { marginTop: Spacing.four },
 
