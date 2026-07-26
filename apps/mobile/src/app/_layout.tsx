@@ -36,11 +36,11 @@ export default function RootLayout() {
           }}
         >
           {/* index sets its own header, so it can wire the hamburger to screen state.
-              Without these two the header falls back to printing the route path. */}
+              Without this the header falls back to printing the route path. The 3D model
+              lives inline on the report now (case-report.tsx) rather than its own route. */}
           <Stack.Screen name="index" options={{ title: 'Partli' }} />
           <Stack.Screen name="case/[id]" options={{ title: 'Diagnosis' }} />
           <Stack.Screen name="case/[id]/send" options={{ title: 'Send to customer' }} />
-          <Stack.Screen name="case/[id]/inspection" options={{ title: '3D inspection' }} />
         </Stack>
       </ThemeProvider>
     </SafeAreaProvider>

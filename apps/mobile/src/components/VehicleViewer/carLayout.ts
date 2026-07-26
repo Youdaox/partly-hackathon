@@ -498,11 +498,10 @@ export function positionForMesh(meshName: string): [number, number, number] {
 
 /**
  * Every part a tap on the real GLB body surface is allowed to resolve to —
- * every non-hidden panel plus the wheels. This is a locate-a-part tool first
- * (see InspectionViewerScreen's own doc comment): a tap should be able to land
- * on any exterior part, not only ones currently carrying an active region, so
- * GlbCarModel passes this whole set to `nearestExteriorMesh` rather than
- * narrowing it to whatever's highlighted.
+ * every non-hidden panel plus the wheels. This is a locate-a-part tool first:
+ * a tap should be able to land on any exterior part, not only ones currently
+ * carrying an active region, so GlbCarModel passes this whole set to
+ * `nearestExteriorMesh` rather than narrowing it to whatever's highlighted.
  */
 export function exteriorMeshNames(): string[] {
   return [

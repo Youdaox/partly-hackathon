@@ -117,9 +117,13 @@ export function DamageOverlay({
     onSelect(meshName);
   };
 
-  const haloColor = !region
+  // Selected always reads as blue, regardless of what's under it — a repairer
+  // tapping around to locate a part needs one consistent "this is the one I
+  // picked" colour, not one that keeps changing with whatever region happens
+  // to be under their thumb.
+  const haloColor = selected
     ? SELECTION_COLOR
-    : region.damageType === 'invisible'
+    : region?.damageType === 'invisible'
       ? INVISIBLE_COLOR
       : VISIBLE_COLOR;
 

@@ -79,24 +79,28 @@ def repredict(case_id: str, rank_inspections: bool = True) -> dict | None:
     return payload
 
 
-def confirm(case_id: str, part_id: str, damaged: bool) -> dict | None:
+def confirm(case_id: str, part_id: str, damaged: bool | None) -> dict | None:
     """The tick/cross loop. Budgeted at 150 ms, so no counterfactual re-ranking.
 
     Re-runs propagation with the *full* clamp set, never just the newest one
     (spec 7.4) — that falls out of recomputing from the case's confirmations
-    dict rather than mutating the previous report.
+    dict rather than mutating the previous report. `damaged=None` clears a
+    prior tick/cross instead of setting one, returning the part to the AI's
+    own bucket.
     """
     case = cases.get_case(case_id)
     if case is None:
         return None
     cases.set_confirmation(case, part_id, damaged)
 
-    # Confirming a part proves teardown has reached its layer.
-    catalogue, _ = _catalogue(case)
-    if catalogue is not None:
-        part = catalogue.by_id.get(part_id)
-        if part is not None:
-            case.exposed_depth = max(case.exposed_depth, part.depth)
+    # Confirming a part proves teardown has reached its layer — but clearing one
+    # is undoing a mistake, not new evidence, so it must not advance teardown.
+    if damaged is not None:
+        catalogue, _ = _catalogue(case)
+        if catalogue is not None:
+            part = catalogue.by_id.get(part_id)
+            if part is not None:
+                case.exposed_depth = max(case.exposed_depth, part.depth)
 
     return repredict(case_id, rank_inspections=False)
 

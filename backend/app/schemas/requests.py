@@ -39,7 +39,9 @@ class PredictionRunRequest(BaseModel):
 class ConfirmRequest(BaseModel):
     case_id: str
     part_id: str
-    damaged: bool
+    # null clears a prior tick/cross and returns the part to whatever the model's
+    # own probability says — "back to AI-suggested" rather than settled either way.
+    damaged: bool | None
 
 
 class OrderLineRequest(BaseModel):

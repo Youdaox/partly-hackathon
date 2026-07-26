@@ -4,16 +4,20 @@
  * Rendered inline on the entry screen and by the `/case/[id]` deep link, so there is one
  * implementation. Scrolls; the composer sits below it and is the caller's business.
  *
- * There is deliberately no vehicle silhouette here. The impact zone is stated in words on
- * the status line instead — a drawing of a car that cannot show left from right on a side
- * profile was decoration, and it pushed the actual parts list below the fold.
+ * The 3D model lives here now, not behind a separate "3D inspection" screen reached by a
+ * button — it's a stage docked above the part list, and the same Confirmed/AI-predicted
+ * filter tab that picks which cards show below also picks which halo colour shows on the
+ * car above them. Tapping a card highlights + focuses the matching part on the car above
+ * it; tapping a part on the car tints its matching card below — one `selectedMeshName`
+ * drives both directions, same as the standalone viewer did before it moved here.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 
+import { DamageLegend } from '@/components/Damage/DamageLegend';
 import { Framed } from '@/components/framed';
 import { ThemedText } from '@/components/themed-text';
 import {
@@ -21,10 +25,13 @@ import {
   Loading,
   SectionLabel,
 } from '@/components/ui';
+import { meshForPart } from '@/components/VehicleViewer/carLayout';
+import { VehicleViewer } from '@/components/VehicleViewer/VehicleViewer';
 import { Radius, Spacing, TapTarget } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import type { ErrorInfo } from '@/hooks/use-case';
 import type { CaseReport, ReportLine, VehiclePayload } from '@/lib/backend';
+import { regionsFromReport } from '@/lib/damage-regions';
 
 /** The backend's `impact.side` code, in the repairer's words. */
 function sideLabel(side: string | null | undefined): string | null {
@@ -73,6 +80,12 @@ function impactLine(report: CaseReport): string | null {
   const where = side && side !== 'centre' ? `${zone}-${side}` : zone;
   return `${where.charAt(0).toUpperCase()}${where.slice(1)} collision`;
 }
+
+/** The 3D viewer's own "this is the one you picked" colour (DamageOverlay.tsx's
+ * SELECTION_COLOR) — reused here so a card reads as selected the same way regardless
+ * of the theme's accent, which changes independently of what "selected" means. */
+const SELECTED_COLOR = '#4C9AFF';
+const SELECTED_TINT = 'rgba(76, 154, 255, 0.12)';
 
 /** How much a probability must move before it is worth pointing at. */
 const CASCADE_EPSILON = 0.005;
@@ -166,7 +179,8 @@ export interface CaseReportViewProps {
   /** Which check row has its attribution open. */
   expanded: string | null;
   onToggleExpanded: (partId: string | null) => void;
-  onConfirm: (partId: string, damaged: boolean) => void;
+  /** `damaged: null` clears a prior tick/cross, returning the part to the AI's own bucket. */
+  onConfirm: (partId: string, damaged: boolean | null) => void;
   onAnswer: (questionId: string, value: string) => void;
   /** Rendered under the last section, e.g. a Send-to-customer button. */
   footer?: React.ReactNode;
@@ -188,12 +202,20 @@ export function CaseReportView({
 }: CaseReportViewProps) {
   const theme = useTheme();
   const cascade = useCascade(report);
+  const regions = useMemo(() => regionsFromReport(report), [report]);
 
   /**
    * Which group is expanded. Hidden damage on arrival: it is what the product is for, and
    * the only group with a decision attached to every row.
    */
   const [openSection, setOpenSection] = useState<SectionKey>('confirmed');
+
+  /** The part currently glowing on the 3D car — set by tapping either the car or a card. */
+  const [selectedMeshName, setSelectedMeshName] = useState<string | null>(null);
+
+  /** Tapping the same part again clears the selection instead of re-selecting it. */
+  const selectPart = (meshName: string) =>
+    setSelectedMeshName((current) => (current === meshName ? null : meshName));
 
   const resolving = vehicle?.status === 'resolving';
 
@@ -283,6 +305,23 @@ export function CaseReportView({
   const active = groups.find((group) => group.key === openSection) ?? groups[0];
   const confirmedView = active.key === 'confirmed';
 
+  // The car shows whichever half of the story the open tab is telling: the same
+  // orange/purple halo the standalone viewer used, so switching tabs re-colours
+  // the car rather than needing a second, separate toggle for the same idea.
+  const activeRegions = regions.filter((region) =>
+    confirmedView ? region.damageType === 'visible' : region.damageType === 'invisible',
+  );
+
+  const impactZone = report.impact?.zone ?? 'front';
+  /** Every top-level line carries `klass`/`side` (see report_service.py); hardware/consumable
+   * sub-lines never reach this list at all, so they're the only ones this can return null for. */
+  const meshForLine = (line: ReportLine): string | null =>
+    line.klass ? meshForPart(line.klass, line.side ?? 'C', impactZone) : null;
+
+  // The "AI sees what humans cannot" moment — surfaces the first time the AI-predicted
+  // tab is open and nothing is selected yet.
+  const showInsightBanner = !confirmedView && !selectedMeshName && activeRegions.length > 0;
+
   return (
     <ScrollView contentContainerStyle={styles.list} keyboardShouldPersistTaps="handled">
       {statusPill}
@@ -308,6 +347,33 @@ export function CaseReportView({
           </ThemedText>
         ) : null}
       </Framed>
+
+      {/* The 3D stage: a rounded dark "showroom" card, not a full-bleed rectangle butting
+          straight up against the page. Halo colour follows the open tab below it. */}
+      <View style={[styles.stage, { shadowColor: theme.text }]}>
+        <VehicleViewer
+          activeRegions={activeRegions}
+          showInvisible={!confirmedView}
+          selectedMeshName={selectedMeshName}
+          onSelectPart={selectPart}
+        />
+
+        <View style={styles.legendOverlay}>
+          <DamageLegend />
+        </View>
+
+        {showInsightBanner ? (
+          <View style={styles.insightBanner}>
+            <View style={[styles.insightCard, { backgroundColor: theme.backgroundElement }]}>
+              <ThemedText type="smallBold">AI Insight</ThemedText>
+              <ThemedText type="small" themeColor="textSecondary">
+                The collision angle and bumper deformation indicate there may be damage behind
+                the visible impact area. Tap a glowing part to see why.
+              </ThemedText>
+            </View>
+          </View>
+        ) : null}
+      </View>
 
       {/* Two filters, not three collapsing sections. The count leads because it is what
           the repairer is scanning for; the selected one fills so the choice is obvious
@@ -432,6 +498,8 @@ export function CaseReportView({
             const change = cascade.changes.get(line.part_id);
             const isNew = cascade.arrived.has(line.part_id);
             const dropped = change != null && change.to < change.from;
+            const meshName = meshForLine(line);
+            const selectedOnCar = meshName !== null && meshName === selectedMeshName;
 
             return (
               // Cards fade in on a filter swap and when the model adds one, so a list
@@ -443,13 +511,28 @@ export function CaseReportView({
                 style={[
                   styles.partCard,
                   {
-                    borderColor: theme.border,
-                    backgroundColor:
-                      change != null || isNew ? theme.badgeFill : theme.backgroundElement,
+                    borderColor: selectedOnCar ? SELECTED_COLOR : theme.border,
+                    backgroundColor: selectedOnCar
+                      ? SELECTED_TINT
+                      : change != null || isNew
+                        ? theme.badgeFill
+                        : theme.backgroundElement,
                   },
                 ]}
               >
-                <View style={styles.partCardBody}>
+                {/* Tapping the card is the other half of the sync: it highlights + focuses
+                    this part on the 3D car above, same as tapping the part on the car itself
+                    selects this card. Only lines with a `klass` place onto the model at all. */}
+                <Pressable
+                  disabled={!meshName}
+                  accessibilityRole={meshName ? 'button' : undefined}
+                  accessibilityLabel={meshName ? `Show ${line.name} on the 3D model` : undefined}
+                  onPress={() => meshName && selectPart(meshName)}
+                  style={({ pressed }) => [
+                    styles.partCardBody,
+                    { opacity: pressed && meshName ? 0.7 : 1 },
+                  ]}
+                >
                   {/* The likelihood leads the card, at a size you can read at
                       arm's length — it is the number the repairer sorts on.
                       Only predictions carry it; a confirmed part is a fact. */}
@@ -507,9 +590,28 @@ export function CaseReportView({
                     {confirmedView ? (
                       <View style={styles.verifiedRow}>
                         <Ionicons name="checkmark" size={14} color={theme.textSecondary} />
-                        <ThemedText type="small" themeColor="textSecondary">
+                        <ThemedText type="small" themeColor="textSecondary" style={styles.grow}>
                           verified
                         </ThemedText>
+                        {/* A tick can be a mistake — this clears it rather than ruling the
+                            part out, so it falls back to whatever the model's own probability
+                            says (AI-predicted) instead of being dropped from the report. */}
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={`Return ${line.name} to AI-predicted`}
+                          disabled={busyId === line.part_id}
+                          onPress={() => onConfirm(line.part_id, null)}
+                          hitSlop={8}
+                          style={({ pressed }) => [
+                            styles.removeLink,
+                            { opacity: pressed ? 0.5 : 1 },
+                          ]}
+                        >
+                          <Ionicons name="arrow-undo-outline" size={14} color={theme.textSecondary} />
+                          <ThemedText type="small" themeColor="textSecondary">
+                            Reset
+                          </ThemedText>
+                        </Pressable>
                       </View>
                     ) : (
                       <Pressable
@@ -530,7 +632,7 @@ export function CaseReportView({
                       </Pressable>
                     )}
                   </View>
-                </View>
+                </Pressable>
               </Animated.View>
             );
           })
@@ -639,6 +741,23 @@ const styles = StyleSheet.create({
   },
   heroReason: { fontSize: 16, lineHeight: 24 },
   hardwareList: { paddingLeft: Spacing.four, gap: Spacing.half },
+
+  // The 3D stage. Fixed height, not flex — this sits inside a ScrollView, not a
+  // fixed-height screen.
+  stage: {
+    height: 320,
+    borderRadius: Radius.card,
+    overflow: 'hidden',
+    backgroundColor: '#14161A',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    elevation: 4,
+  },
+  legendOverlay: { position: 'absolute', top: Spacing.two, left: Spacing.two },
+  insightBanner: { position: 'absolute', left: Spacing.two, right: Spacing.two, bottom: Spacing.two },
+  insightCard: { borderRadius: Radius.card, padding: Spacing.three, gap: Spacing.one },
+
   deltaRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one },
   newBadge: {
     borderRadius: Radius.chip,
@@ -752,6 +871,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.one,
     marginTop: Spacing.two,
+    minHeight: 28,
+  },
+  removeLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one,
     minHeight: 28,
   },
   rowRemove: {

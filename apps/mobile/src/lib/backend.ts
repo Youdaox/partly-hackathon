@@ -280,7 +280,9 @@ export const backend = {
 
   getResults: (caseId: string) => request<CaseReport>(`/prediction/results/${caseId}`),
 
-  confirmInspection: (caseId: string, partId: string, damaged: boolean) =>
+  /** `damaged: null` clears a prior tick/cross, returning the part to whatever
+   * the model's own probability says instead of settling it either way. */
+  confirmInspection: (caseId: string, partId: string, damaged: boolean | null) =>
     request<CaseReport>('/inspection/confirm', {
       method: 'POST',
       body: JSON.stringify({ case_id: caseId, part_id: partId, damaged }),

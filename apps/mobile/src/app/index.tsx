@@ -276,17 +276,6 @@ export default function HomeScreen() {
               <View style={styles.dockLinks}>
                 <Pressable
                   accessibilityRole="button"
-                  onPress={() => router.push(`/case/${caseId}/inspection`)}
-                  style={({ pressed }) => [styles.dockLink, { opacity: pressed ? 0.6 : 1 }]}
-                >
-                  <Ionicons name="cube-outline" size={16} color={theme.accent} />
-                  <ThemedText type="smallBold" style={{ color: theme.accent }}>
-                    3D inspection
-                  </ThemedText>
-                </Pressable>
-
-                <Pressable
-                  accessibilityRole="button"
                   onPress={() => router.push(`/case/${caseId}/send`)}
                   style={({ pressed }) => [styles.dockLink, { opacity: pressed ? 0.6 : 1 }]}
                 >
