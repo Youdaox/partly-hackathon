@@ -244,9 +244,16 @@ def make_observation(case_id: str, **kwargs: Any) -> Observation:
     return Observation(id=new_id("obs"), case_id=case_id, **kwargs)
 
 
-def set_confirmation(case: Case, part_id: str, damaged: bool) -> None:
+def set_confirmation(case: Case, part_id: str, damaged: bool | None) -> None:
     with _lock:
-        case.confirmations[part_id] = damaged
+        if damaged is None:
+            # Clears the tick/cross rather than recording a third state — the
+            # engine already treats "no entry" as undecided (graph.py reads it
+            # back with `.get(pid)`, defaulting to None), so this is the same
+            # as the part never having been confirmed either way.
+            case.confirmations.pop(part_id, None)
+        else:
+            case.confirmations[part_id] = damaged
         # Teardown that reveals a part proves everything above it is exposed.
         touch(case)
 

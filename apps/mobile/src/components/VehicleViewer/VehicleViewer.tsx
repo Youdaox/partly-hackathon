@@ -1,5 +1,6 @@
 /**
- * Interactive 3D vehicle viewer — the centrepiece of the inspection screen.
+ * Interactive 3D vehicle viewer — docked above the part list on the diagnosis report
+ * (case-report.tsx).
  *
  * Orchestration only: owns the R3F Canvas, lighting, and the gesture-driven camera
  * rig, and hands the actual geometry off to GlbCarModel (assets/models/generic-car.glb).

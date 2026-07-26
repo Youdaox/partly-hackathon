@@ -34,7 +34,7 @@ function toRegionPart(line: ReportLine, bucket: Bucket): RegionPart {
   };
 }
 
-/** Short, plain-language line for the region as a whole — DamageCard's summary text. */
+/** Short, plain-language line for the region as a whole. */
 function describeRegion(damageType: DamageType, parts: RegionPart[]): string {
   if (damageType === 'visible') {
     const names = parts.map((p) => p.name);
@@ -76,14 +76,16 @@ export function regionsFromReport(report: CaseReport | null | undefined): Damage
 
   const regions: DamageRegion[] = [];
   for (const [meshName, { visible, predicted }] of byMesh) {
-    // A mesh with any stated fact reads as "fact" (orange) even if a sibling
-    // part on it is only predicted — the predicted part still shows up in the
-    // list underneath with its own likelihood, it just doesn't downgrade the halo.
-    const damageType: DamageType = visible.length > 0 ? 'visible' : 'invisible';
+    // A mesh reads "confirmed" (orange) if the camera stated it outright, or a
+    // repairer ticked a predicted part on it — same "Confirmed" the report page's
+    // own filter tab uses, so the two agree about what counts as settled rather
+    // than the 3D view drawing a line the list underneath disagrees with.
+    const ticked = predicted.filter((p) => p.confirmed === true);
+    const damageType: DamageType = visible.length > 0 || ticked.length > 0 ? 'visible' : 'invisible';
     const parts = [...visible, ...predicted].sort((a, b) => b.p - a.p);
     const confidence =
       damageType === 'visible'
-        ? Math.max(0.9, ...visible.map((p) => p.p))
+        ? Math.max(0.9, ...visible.map((p) => p.p), ...ticked.map((p) => p.p))
         : Math.max(...predicted.map((p) => p.p));
 
     regions.push({
@@ -91,7 +93,9 @@ export function regionsFromReport(report: CaseReport | null | undefined): Damage
       partName: parts[0].name,
       damageType,
       confidence,
-      description: describeRegion(damageType, damageType === 'visible' ? visible : predicted),
+      // The combined, confidence-sorted list either way — a ticked part sorted in
+      // was never pulled into a separate `visible`-only array to describe from.
+      description: describeRegion(damageType, parts),
       parts,
     });
   }

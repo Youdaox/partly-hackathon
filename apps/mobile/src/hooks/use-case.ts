@@ -31,7 +31,8 @@ export interface UseCaseResult {
   transcribing: boolean;
   /** The last transcript the backend returned, so the UI can echo what it heard. */
   transcript: string | null;
-  confirm: (partId: string, damaged: boolean) => Promise<void>;
+  /** `damaged: null` clears a prior tick/cross, returning the part to the AI's own bucket. */
+  confirm: (partId: string, damaged: boolean | null) => Promise<void>;
   answer: (questionId: string, value: string) => Promise<void>;
   ask: (text: string) => Promise<void>;
   transcribe: (uri: string, mimeType?: string) => Promise<void>;
@@ -127,7 +128,7 @@ export function useCase(caseId: string | null, vehicleId?: string | null): UseCa
   );
 
   const confirm = useCallback(
-    async (partId: string, damaged: boolean) => {
+    async (partId: string, damaged: boolean | null) => {
       if (!caseId) return;
       setBusyId(partId);
       await run(
