@@ -187,30 +187,52 @@ def next_question(
             )
 
     # Then: the most informative part he could go and look at right now.
-    best: Inspection | None = None
-    for item in inspections or ():
+    #
+    # Tiered, because every vehicle must end up with a question and the three
+    # differ enormously in what they can offer. The Santa Fe has parts whose
+    # answer moves nine others; the Yaris's uncertain parts are all leaves that
+    # settle only themselves; the E-Pace's light front knock leaves almost
+    # nothing undecided at all. Insisting on the strongest tier gave two of the
+    # three cars no question, so each tier relaxes exactly one requirement and
+    # the reason for the ask is recorded on the Question.
+    def eligible(item: Inspection) -> Part | None:
         part = by_id.get(item.part_id)
         prediction = predictions.get(item.part_id)
         if part is None or prediction is None:
-            continue
+            return None
         if f"q_check_{item.part_id}" in asked:
-            continue
+            return None
         # Reachable without taking the car apart further.
         if not item.accessible:
-            continue
-        # Genuinely undecided — anything already high or already low is settled
-        # enough that an answer would not move it.
-        if not (QUESTION_BAND_MIN <= prediction.p <= QUESTION_BAND_MAX):
-            continue
-        # Nobody inspects a clip. Consumables are also folded under their parent
-        # in the report, so settling one changes nothing he can see.
+            return None
+        # Nobody inspects a clip. Consumables are folded under their parent in
+        # the report, so settling one changes nothing he can see.
         if part.klass in CONSUMABLE_KLASSES:
-            continue
-        # It has to settle *other* parts, not just itself.
-        if item.downstream < QUESTION_MIN_DOWNSTREAM:
-            continue
-        if best is None or item.downstream > best.downstream:
-            best = item
+            return None
+        return part
+
+    pool = [item for item in (inspections or ()) if eligible(item) is not None]
+    undecided = [
+        item
+        for item in pool
+        if QUESTION_BAND_MIN <= predictions[item.part_id].p <= QUESTION_BAND_MAX
+    ]
+
+    # 1. Undecided *and* it settles other parts too — the question worth asking.
+    informative = [i for i in undecided if i.downstream >= QUESTION_MIN_DOWNSTREAM]
+    # 2. Undecided, but terminal: answering settles this part and no more. Still
+    #    a real reduction in uncertainty, just a smaller one.
+    # 3. Nothing sits in the undecided band at all, so take whatever is least
+    #    settled. On a light impact this is the best that honestly exists.
+    best = (
+        max(informative, key=lambda i: i.downstream)
+        if informative
+        else max(undecided, key=lambda i: i.value)
+        if undecided
+        else max(pool, key=lambda i: i.own)
+        if pool
+        else None
+    )
 
     if best is None:
         return None

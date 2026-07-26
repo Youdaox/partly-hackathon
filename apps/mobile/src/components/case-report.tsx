@@ -153,6 +153,37 @@ function useCascade(report: CaseReport | null) {
   return { changes, departed, arrived };
 }
 
+/**
+ * Where a probability came from, in one line.
+ *
+ * The number is a noisy-OR over decomposable terms, and `attribution` is that
+ * decomposition — each cause's share of the log-odds, summing to 1. Printing
+ * the top two is the difference between a repairer reading "88%" as a figure
+ * the app invented and reading it as a figure with parts he can check.
+ *
+ * `root` is the impact reaching this part's depth in its zone; `leak` is the
+ * rate the class gets replaced regardless; anything else names the part that
+ * drove it. Worth knowing when reading these: on most predictions the impact
+ * term is the larger one, so the line will often say so — which is honest
+ * about how much of the number is the graph and how much is the class.
+ */
+function justify(line: ReportLine): string {
+  const causes = line.attribution ?? [];
+  if (causes.length === 0) return '';
+  return causes
+    .slice(0, 2)
+    .map((cause) => {
+      const share = Math.round(cause.share * 100);
+      if (cause.relation === 'root') return `${share}% impact zone`;
+      if (cause.relation === 'leak') return `${share}% base rate`;
+      if (cause.relation === 'observation') return 'seen in the photos';
+      if (cause.relation === 'confirmed') return 'confirmed at the car';
+      return `${share}% ${cause.cause}`;
+    })
+    .join('  ·  ');
+}
+
+
 type SectionKey = 'confirmed' | 'predicted';
 
 export interface CaseReportViewProps {
@@ -473,7 +504,7 @@ export function CaseReportView({
                           </ThemedText>
                         </View>
                       ) : null}
-                      <ThemedText type="rowTitle" style={styles.grow} numberOfLines={2}>
+                      <ThemedText type="rowTitle" style={styles.grow} numberOfLines={1}>
                         {line.name}
                         {line.qty > 1 ? (
                           <ThemedText type="smallBold" style={{ color: theme.textSecondary }}>
@@ -483,7 +514,9 @@ export function CaseReportView({
                       </ThemedText>
                     </View>
 
-                    {/* The move itself, in points, legible from a metre away. */}
+                    {/* The move itself, in points, legible from a metre away.
+                        It stands in for the justification while it shows, so a
+                        moved card is the same height as a still one. */}
                     {change != null ? (
                       <View style={styles.deltaRow}>
                         <Ionicons
@@ -502,7 +535,18 @@ export function CaseReportView({
                           was {Math.round(change.from * 100)}%
                         </ThemedText>
                       </View>
-                    ) : null}
+                    ) : (
+                      // Why this number, not a number. Two lines, clamped, so
+                      // every card is the same height whatever it says.
+                      <ThemedText
+                        type="small"
+                        themeColor="textSecondary"
+                        numberOfLines={2}
+                        style={styles.justification}
+                      >
+                        {confirmedView ? 'Confirmed at the car' : justify(line)}
+                      </ThemedText>
+                    )}
 
                     {confirmedView ? (
                       <View style={styles.verifiedRow}>
@@ -728,10 +772,17 @@ const styles = StyleSheet.create({
   // One card per part, as the mockup has them — the grouped list read as a
   // table, and a table invites scanning rather than deciding.
   cardList: { gap: Spacing.two },
+  // One fixed height for every card. Heights used to vary with how far a part
+  // name wrapped and whether the last answer had moved that row, which turned
+  // a scannable column into a ragged one. The name is clamped to a line and the
+  // justification to two, so the box is the same box every time.
   partCard: {
+    height: 132,
+    justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: Radius.card,
-    padding: Spacing.three,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
   },
   partCardBody: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.three },
   partCardHead: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
@@ -741,6 +792,7 @@ const styles = StyleSheet.create({
   percentValue: { fontSize: 34, lineHeight: 38, fontWeight: '300', letterSpacing: -1 },
   percentSign: { fontSize: 13, lineHeight: 20, marginTop: 4, marginLeft: 1 },
 
+  justification: { marginTop: 2, lineHeight: 18 },
   verifiedRow: {
     flexDirection: 'row',
     alignItems: 'center',

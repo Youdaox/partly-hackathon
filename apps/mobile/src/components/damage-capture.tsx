@@ -23,26 +23,35 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
-  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
+  TextInput,
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 
-import { Composer } from '@/components/composer';
+import Animated, {
+  interpolateColor,
+  useAnimatedStyle,
+  useDerivedValue,
+  withTiming,
+} from 'react-native-reanimated';
+
+
 import { ThemedText } from '@/components/themed-text';
 import { PropagationGraph } from '@/components/PropagationGraph';
-import { SuggestionRow } from '@/components/ui';
-import { Radius, Spacing } from '@/constants/theme';
+import { Faces, Intake, NoFocusRing, Radius, Spacing, TapTarget } from '@/constants/theme';
 import { toErrorInfo } from '@/hooks/use-async-data';
 import type { ErrorInfo, MediaFile } from '@/hooks/use-case';
 import { useTheme } from '@/hooks/use-theme';
 import type { VehiclePayload } from '@/lib/backend';
 
 const BEAT_MS = 700;
+
+/** The home screen's 150ms ease, so the two screens agree. */
+const ACCENT_MS = 150;
 
 // No cap on how many photos go with a case. A repairer walks a wrecked car and
 // shoots every angle; the count is whatever the damage takes. The backend has
@@ -74,6 +83,54 @@ export interface DamageCaptureProps {
   onMicPress?: () => void;
   micActive?: boolean;
   micDisabled?: boolean;
+  /** Header chevron — back to the rego. */
+  onBack: () => void;
+  /** Header "+" — start another vehicle. */
+  onNewAssessment: () => void;
+}
+
+/**
+ * One way in, on the evidence list. Icon chip, title over meta, one arrow.
+ *
+ * The chip's shape says what kind of evidence it is before the label does —
+ * square for stills, round for video, dashed for the no-media path.
+ */
+function EvidenceRow({
+  icon,
+  chipShape,
+  title,
+  meta,
+  onPress,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  chipShape: 'square' | 'round' | 'dashed';
+  title: string;
+  meta: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${title}. ${meta}`}
+      onPress={onPress}
+      style={({ pressed }) => [styles.evidenceRow, { opacity: pressed ? 0.6 : 1 }]}
+    >
+      <View
+        style={[
+          styles.evidenceChip,
+          chipShape === 'round' && styles.evidenceChipRound,
+          chipShape === 'dashed' && styles.evidenceChipDashed,
+        ]}
+      >
+        <Ionicons name={icon} size={12} color={Intake.mutedLabel} />
+      </View>
+      <View style={styles.evidenceCopy}>
+        <ThemedText style={styles.evidenceTitle}>{title}</ThemedText>
+        <ThemedText style={styles.evidenceMeta}>{meta}</ThemedText>
+      </View>
+      <ThemedText style={styles.footerArrow}>→</ThemedText>
+    </Pressable>
+  );
 }
 
 export function DamageCapture({
@@ -88,17 +145,40 @@ export function DamageCapture({
   onMicPress,
   micActive,
   micDisabled,
+  onBack,
+  onNewAssessment,
 }: DamageCaptureProps) {
   const theme = useTheme();
   const [draft, setDraft] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [beat, setBeat] = useState(-1);
   const [error, setError] = useState<ErrorInfo | null>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
   /** Send was pressed before the catalogue landed; run it the moment it does. */
   const [queued, setQueued] = useState(false);
 
   const analysing = beat >= 0 || queued;
+
+  // Analyse lights up on the first character *or* the first attachment — the
+  // spec's rule is "empty AND no media", so a photo alone is enough to submit.
+  const armed = draft.trim().length > 0 || attachments.length > 0;
+  const accent = useDerivedValue(() => withTiming(armed ? 1 : 0, { duration: ACCENT_MS }));
+  const underlineStyle = useAnimatedStyle(() => ({
+    borderBottomColor: interpolateColor(
+      accent.value,
+      [0, 1],
+      [Intake.ruleInput, Intake.accent],
+    ),
+  }));
+  const analyseFill = useAnimatedStyle(() => ({
+    backgroundColor: interpolateColor(
+      accent.value,
+      [0, 1],
+      [Intake.buttonIdle, Intake.accent],
+    ),
+  }));
+  const analyseText = useAnimatedStyle(() => ({
+    color: interpolateColor(accent.value, [0, 1], [Intake.buttonIdleText, '#FFFFFF']),
+  }));
 
   // Held work, released by the effect below once the case exists. Kept in a ref
   // so the effect does not re-fire on every keystroke.
@@ -129,7 +209,6 @@ export function DamageCapture({
 
   const pickFromLibrary = useCallback(
     async (mediaTypes: 'images' | 'videos') => {
-      setMenuOpen(false);
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permission.granted) {
         setError({
@@ -155,19 +234,6 @@ export function DamageCapture({
     [add],
   );
 
-  const takePhoto = useCallback(async () => {
-    setMenuOpen(false);
-    const permission = await ImagePicker.requestCameraPermissionsAsync();
-    if (!permission.granted) {
-      setError({
-        title: 'Camera access denied',
-        detail: 'Grant access in Settings to photograph the damage.',
-      });
-      return;
-    }
-    const result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'] });
-    if (!result.canceled) add(result.assets);
-  }, [add]);
 
   /** The staged reveal. Shared by send and skip so they read identically. */
   const runAnalysis = useCallback(
@@ -246,31 +312,64 @@ export function DamageCapture({
    * the catalogue lands last. None of it gates adding photos — that is the
    * whole point of showing it here instead of on a loading screen.
    */
-  const header = (
-    <View style={[styles.vehicleBar, { borderBottomColor: theme.border }]}>
+  const screenHeader = (
+    <View style={styles.screenHeader}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Back to the rego"
+        onPress={onBack}
+        hitSlop={12}
+        style={styles.headerTap}
+      >
+        <Ionicons name="chevron-back" size={20} color={Intake.accent} />
+      </Pressable>
+      <ThemedText style={styles.eyebrow}>Damage intake</ThemedText>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Start another assessment"
+        onPress={onNewAssessment}
+        hitSlop={12}
+        style={[styles.headerTap, styles.headerTapEnd]}
+      >
+        <Ionicons name="add" size={20} color={Intake.accent} />
+      </Pressable>
+    </View>
+  );
+
+  /**
+   * The background track, reported rather than waited on.
+   *
+   * The plate is known immediately, the VIN takes a moment and the catalogue
+   * lands last. None of it gates adding photos — which is the whole reason it
+   * is a line here rather than a loading screen in front.
+   */
+  const vehicleRow = (
+    <View style={styles.vehicleRow}>
       {trackError ? (
         <>
-          <Ionicons name="alert-circle" size={16} color={theme.danger} />
-          <ThemedText type="smallBold" style={{ color: theme.danger }}>
+          <Ionicons name="alert-circle" size={15} color={theme.danger} />
+          <ThemedText style={[styles.vehicleName, { color: theme.danger }]}>
             {trackError.title}
           </ThemedText>
         </>
       ) : ready ? (
         <>
-          <Ionicons name="checkmark-circle" size={16} color={theme.success} />
-          <ThemedText type="smallBold" style={styles.vehicleName}>
+          <View style={styles.successDot}>
+            <Ionicons name="checkmark" size={10} color="#FFFFFF" />
+          </View>
+          <ThemedText style={styles.vehicleName}>
             {[vehicle?.year, vehicle?.make, vehicle?.model].filter(Boolean).join(' ')}
           </ThemedText>
-          <ThemedText type="small" themeColor="textSecondary">
-            {vehicle?.rego ?? rego} · {vehicle?.parts_indexed?.toLocaleString() ?? 0} parts
-            loaded
+          <ThemedText style={styles.plate}>{vehicle?.rego ?? rego}</ThemedText>
+          <ThemedText style={styles.vehicleMeta}>
+            {vehicle?.parts_indexed?.toLocaleString() ?? 0} parts loaded
           </ThemedText>
         </>
       ) : (
         <>
-          <ActivityIndicator size="small" color={theme.accent} />
-          <ThemedText type="smallBold">{rego}</ThemedText>
-          <ThemedText type="small" themeColor="textSecondary">
+          <ActivityIndicator size="small" color={Intake.accent} />
+          <ThemedText style={styles.plate}>{rego}</ThemedText>
+          <ThemedText style={styles.vehicleMeta}>
             {vehicle && vehicle.status !== 'resolving'
               ? 'Loading OEM catalogue…'
               : 'Resolving VIN…'}
@@ -331,146 +430,286 @@ export function DamageCapture({
   // --- the analysis, in place of the greeting (mirrors screen 1's VIN beat) --
   if (analysing) {
     return (
-      <ScrollView contentContainerStyle={styles.heroScroll} keyboardShouldPersistTaps="handled">
-        <View style={styles.hero}>
-          {header}
-          <ThemedText type="heading" style={styles.heading}>
-            Analysing the damage…
-          </ThemedText>
-
+      <View style={styles.page}>
+        {screenHeader}
+        <ScrollView contentContainerStyle={styles.analysing} keyboardShouldPersistTaps="handled">
+          {vehicleRow}
+          <ThemedText style={styles.headline}>Analysing the damage…</ThemedText>
           {attachments.length > 0 ? thumbnails(true) : null}
-
-          {/* One picture of what the engine is doing, in place of a list of
-              labels describing it. Loops in both states — a queued send is
-              still an analysis, it is just waiting on the catalogue first. */}
           <View style={styles.graph}>
             <PropagationGraph />
-            <ThemedText type="small" themeColor="textSecondary" style={styles.graphCaption}>
+            <ThemedText style={styles.body}>
               {queued
                 ? 'Waiting for the catalogue, then propagating…'
                 : 'Propagating through the parts graph…'}
             </ThemedText>
           </View>
-        </View>
-      </ScrollView>
+        </ScrollView>
+      </View>
     );
   }
 
-  // --- the hero, same shape as the rego screen ------------------------------
+  // --- the intake screen ------------------------------------------------------
   return (
-    <ScrollView contentContainerStyle={styles.heroScroll} keyboardShouldPersistTaps="handled">
-      <View style={styles.hero}>
-        {header}
+    <View style={styles.page}>
+      {screenHeader}
 
-        <ThemedText type="heading" style={styles.heading}>
-          Add the damage to start the analysis.
-        </ThemedText>
-
-        {/* Attachments sit above the input, the way they do in a chatbox. */}
-        {attachments.length > 0 ? thumbnails(false) : null}
-
-        <Composer
-          value={draft}
-          onChangeText={setDraft}
-          onSubmit={send}
-          placeholder="Add crash photos, or describe the damage"
-          // Photos are the point of this screen, so the arrow lights up as soon
-          // as one is attached — typing is optional, not the price of sending.
-          canSend={attachments.length > 0 || draft.trim().length > 0}
-          onPlusPress={() => setMenuOpen(true)}
-          onMicPress={onMicPress}
-          micActive={micActive}
-          micDisabled={micDisabled}
-        />
-
-        {error ? (
-          <View style={styles.error}>
-            <ThemedText type="small" style={{ color: theme.danger }}>
-              {error.title}
-            </ThemedText>
-            {error.detail ? (
-              <ThemedText type="small" themeColor="textSecondary" style={styles.errorDetail}>
-                {error.detail}
-              </ThemedText>
-            ) : null}
-          </View>
-        ) : null}
-
-        <View style={styles.suggestions}>
-          <SuggestionRow
-            icon="images-outline"
-            label="Add crash photos — pick several at once"
-            onPress={() => void pickFromLibrary('images')}
-          />
-          <SuggestionRow
-            icon="videocam-outline"
-            label="Add a walkaround video"
-            onPress={() => void pickFromLibrary('videos')}
-          />
-          <SuggestionRow
-            icon="arrow-forward-outline"
-            label="Skip photos and predict now"
-            onPress={skip}
-          />
-        </View>
-      </View>
-
-      {/* The `+` menu: the same three ways in, from the composer. */}
-      <Modal
-        visible={menuOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setMenuOpen(false)}
+      <ScrollView
+        contentContainerStyle={styles.main}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
-        <Pressable style={styles.backdrop} onPress={() => setMenuOpen(false)}>
-          <View style={[styles.sheet, { backgroundColor: theme.background }]}>
-            <SuggestionRow
-              icon="images-outline"
-              label="Photo library — select multiple"
+        <View style={styles.contextGroup}>
+          {vehicleRow}
+          <View style={styles.rule} />
+          <ThemedText style={styles.headline}>Add the damage to start the analysis.</ThemedText>
+          <ThemedText style={styles.body}>
+            Photos read best, but a sentence about what happened is enough to begin.
+          </ThemedText>
+        </View>
+
+        <View style={styles.inputGroup}>
+          <Animated.View style={[styles.field, underlineStyle]}>
+            <TextInput
+              value={draft}
+              onChangeText={setDraft}
+              onSubmitEditing={send}
+              placeholder="Describe the damage"
+              placeholderTextColor={Intake.mutedLabel}
+              accessibilityLabel="Describe the damage"
+              style={styles.input}
+            />
+            {onMicPress ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Dictate"
+                accessibilityState={{ disabled: micDisabled, selected: micActive }}
+                disabled={micDisabled}
+                onPress={onMicPress}
+                hitSlop={12}
+                style={({ pressed }) => [
+                  styles.dictate,
+                  {
+                    borderColor: micActive || pressed ? Intake.accent : Intake.ruleChip,
+                    opacity: micDisabled ? 0.4 : 1,
+                  },
+                ]}
+              >
+                <Ionicons
+                  name={micActive ? 'stop' : 'mic'}
+                  size={13}
+                  color={micActive ? Intake.accent : Intake.mutedLabel}
+                />
+              </Pressable>
+            ) : null}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Analyse"
+              // Announced as well as greyed: colour alone is not the signal.
+              accessibilityState={{ disabled: !armed }}
+              disabled={!armed}
+              onPress={send}
+              style={({ pressed }) => [styles.analyse, { opacity: pressed ? 0.8 : 1 }]}
+            >
+              <Animated.View style={[StyleSheet.absoluteFill, styles.analyseFill, analyseFill]} />
+              <Animated.Text style={[styles.analyseText, analyseText]}>Analyse</Animated.Text>
+            </Pressable>
+          </Animated.View>
+
+          {/* Whatever is already attached, in the treatment the upload path
+              already uses — thumbnails with a remove affordance. */}
+          {attachments.length > 0 ? thumbnails(false) : null}
+
+          {error ? (
+            <View style={styles.error}>
+              <ThemedText style={styles.errorTitle}>{error.title}</ThemedText>
+              {error.detail ? <ThemedText style={styles.body}>{error.detail}</ThemedText> : null}
+            </View>
+          ) : null}
+
+          <View>
+            <ThemedText style={styles.evidenceLabel}>Or add evidence</ThemedText>
+            <EvidenceRow
+              icon="square-outline"
+              chipShape="square"
+              title="Add crash photos"
+              meta="Pick several at once"
               onPress={() => void pickFromLibrary('images')}
             />
-            <SuggestionRow
-              icon="videocam-outline"
-              label="Walkaround video"
+            <EvidenceRow
+              icon="play"
+              chipShape="round"
+              title="Add a walkaround video"
+              meta="20–30 seconds, slow pan"
               onPress={() => void pickFromLibrary('videos')}
             />
-            <SuggestionRow
-              icon="camera-outline"
-              label="Take a photo"
-              onPress={() => void takePhoto()}
+            <EvidenceRow
+              icon="flash-outline"
+              chipShape="dashed"
+              title="Skip photos and predict now"
+              meta="Lower confidence on the first pass"
+              onPress={skip}
             />
           </View>
-        </Pressable>
-      </Modal>
-    </ScrollView>
+        </View>
+      </ScrollView>
+
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="What makes a good crash photo?"
+        onPress={() =>
+          setError({
+            title: 'What makes a good crash photo?',
+            detail:
+              'One wide shot of the whole corner, then one close on each damaged panel. ' +
+              'Daylight, no flash, and get the plate in one of them.',
+          })
+        }
+        style={({ pressed }) => [styles.footer, { opacity: pressed ? 0.6 : 1 }]}
+      >
+        <ThemedText style={styles.footerText}>What makes a good crash photo?</ThemedText>
+        <ThemedText style={styles.footerArrow}>→</ThemedText>
+      </Pressable>
+
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  // Identical to the rego screen's hero, so screen 2 is visibly its twin.
-  heroScroll: { flexGrow: 1, justifyContent: 'center', padding: Spacing.three },
-  hero: { width: '100%', maxWidth: 720, alignSelf: 'center' },
-  heading: { textAlign: 'center', marginBottom: Spacing.four },
-  suggestions: { marginTop: Spacing.four },
+  page: { flex: 1, backgroundColor: Intake.page },
 
-  vehicleBar: {
+  screenHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    flexWrap: 'wrap',
-    gap: Spacing.two,
-    paddingBottom: Spacing.three,
-    marginBottom: Spacing.four,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    justifyContent: 'space-between',
+    paddingTop: 20,
+    paddingHorizontal: Intake.gutter,
   },
-  vehicleName: { flexShrink: 1 },
+  // 20px glyphs inside 44pt targets, without widening the visual header.
+  headerTap: { width: TapTarget - 12, height: TapTarget - 12, justifyContent: 'center' },
+  headerTapEnd: { alignItems: 'flex-end' },
+  eyebrow: {
+    fontFamily: Faces.sansMedium,
+    fontSize: 11,
+    letterSpacing: 1.76,
+    textTransform: 'uppercase',
+    color: Intake.mutedLabel,
+  },
 
-  thumbs: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing.two,
-    marginBottom: Spacing.three,
+  main: { paddingTop: 96, gap: 60, paddingHorizontal: Intake.gutter, paddingBottom: 24 },
+  analysing: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    gap: 24,
+    paddingHorizontal: Intake.gutter,
   },
+
+  contextGroup: { gap: 14 },
+  vehicleRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
+  successDot: {
+    width: 15,
+    height: 15,
+    borderRadius: 999,
+    backgroundColor: '#1F9D63',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  vehicleName: { fontFamily: Faces.sansMedium, fontSize: 13.5, color: Intake.ink },
+  plate: {
+    fontFamily: Faces.plate,
+    fontSize: 12,
+    letterSpacing: 0.72,
+    color: Intake.accent,
+  },
+  vehicleMeta: { fontFamily: Faces.sans, fontSize: 12, color: Intake.mutedLabel },
+  rule: { height: 1, backgroundColor: Intake.ruleFooter },
+
+  headline: {
+    fontFamily: Faces.headline,
+    fontSize: 38,
+    lineHeight: 40, // 1.06
+    letterSpacing: -0.57, // -.015em
+    color: Intake.ink,
+  },
+  body: {
+    fontFamily: Faces.sans,
+    fontSize: 14,
+    lineHeight: 22, // 1.55
+    color: Intake.body,
+    maxWidth: 295,
+  },
+
+  inputGroup: { gap: 36 },
+  field: { flexDirection: 'row', alignItems: 'flex-end', gap: 12, borderBottomWidth: 1.5 },
+  input: {
+    flex: 1,
+    fontFamily: Faces.sansMedium,
+    fontSize: 16,
+    lineHeight: 21, // 1.3
+    color: Intake.ink,
+    paddingBottom: 12,
+    ...NoFocusRing,
+  },
+  dictate: {
+    width: 26,
+    height: 26,
+    borderRadius: 999,
+    borderWidth: 1,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+  },
+  analyse: {
+    borderRadius: 999,
+    paddingHorizontal: 20,
+    paddingVertical: 11,
+    marginBottom: 8,
+    overflow: 'hidden',
+    justifyContent: 'center',
+  },
+  analyseFill: { borderRadius: 999 },
+  analyseText: { fontFamily: Faces.sansMedium, fontSize: 13 },
+
+  evidenceLabel: {
+    fontFamily: Faces.sansMedium,
+    fontSize: 10.5,
+    letterSpacing: 1.68,
+    textTransform: 'uppercase',
+    color: Intake.mutedLabel,
+    marginBottom: 18,
+  },
+  evidenceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingVertical: 20,
+    minHeight: TapTarget,
+    borderTopWidth: 1,
+    borderTopColor: Intake.ruleFooter,
+  },
+  evidenceChip: {
+    width: 26,
+    height: 26,
+    borderRadius: 7,
+    borderWidth: 1,
+    borderColor: Intake.ruleChip,
+    backgroundColor: '#F6F5F2',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  evidenceChipRound: { borderRadius: 999 },
+  evidenceChipDashed: { borderStyle: 'dashed' },
+  evidenceCopy: { flex: 1, gap: 3 },
+  evidenceTitle: { fontFamily: Faces.sansMedium, fontSize: 13.5, color: Intake.ink },
+  evidenceMeta: { fontFamily: Faces.sans, fontSize: 11.5, color: Intake.mutedLabel },
+
+  error: { gap: 4 },
+  errorTitle: { fontFamily: Faces.sansMedium, fontSize: 13, color: Intake.accent },
+
+  graph: { alignItems: 'center', gap: Spacing.two },
+
+  thumbs: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
   thumbWrap: {
     width: 76,
     height: 76,
@@ -479,13 +718,6 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   thumb: { width: '100%', height: '100%' },
-  addMore: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 1,
-    borderStyle: 'dashed',
-    borderWidth: 1,
-  },
   thumbScrim: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, opacity: 0.18 },
   thumbRemove: {
     position: 'absolute',
@@ -505,19 +737,26 @@ const styles = StyleSheet.create({
     borderRadius: Radius.round,
     padding: 3,
   },
-
-  graph: { alignItems: 'center', gap: Spacing.two, paddingVertical: Spacing.four },
-  graphCaption: { textAlign: 'center' },
-
-  error: { marginTop: Spacing.three, alignItems: 'center', gap: Spacing.half },
-  errorDetail: { textAlign: 'center' },
-
-  backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: '#00000055' },
-  sheet: {
-    paddingHorizontal: Spacing.four,
-    paddingTop: Spacing.three,
-    paddingBottom: Spacing.six,
-    borderTopLeftRadius: Radius.card,
-    borderTopRightRadius: Radius.card,
+  addMore: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 1,
+    borderStyle: 'dashed',
+    borderWidth: 1,
   },
+
+  footer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginHorizontal: Intake.gutter,
+    marginBottom: 28,
+    paddingTop: 18,
+    minHeight: 44,
+    borderTopWidth: 1,
+    borderTopColor: Intake.ruleFooter,
+  },
+  footerText: { fontFamily: Faces.sans, fontSize: 12.5, color: Intake.body },
+  footerArrow: { fontSize: 15, color: Intake.accent },
+
 });

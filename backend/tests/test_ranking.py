@@ -574,17 +574,35 @@ def test_the_part_asked_about_is_uncertain_reachable_and_the_best_one(client):
     cases.reset()
 
 
-def test_nothing_is_asked_when_nothing_would_move(client):
-    """Acceptance 4. Every one of the Yaris's forty ranked candidates settles
-    only itself — downstream is 0.0000 across the board — so once the side is
-    known there is nothing worth interrupting for. Silence, not filler."""
-    cases.reset()
-    report = open_case(client)
-    asked = _answer_every_question(client, report["case_id"])
-    assert [q["id"] for q in asked] == ["q_side"], f"expected only q_side, got {asked}"
+@pytest.mark.parametrize("rego", ["QMN16", "PNS53", "RFH447"])
+def test_every_vehicle_gets_a_part_specific_question(client, rego):
+    """Every car must have something to ask about.
 
-    after = client.get(f"/v1/prediction/results/{report['case_id']}").json()
-    assert after["question"] is None
+    The three differ enormously in what they can offer — the Santa Fe has parts
+    whose answer moves nine others, the Yaris's uncertain parts are all leaves,
+    and the E-Pace's light knock leaves almost nothing undecided. Requiring the
+    strongest kind of question left two of the three silent, so the selection
+    falls back a tier at a time rather than giving up.
+    """
+    cases.reset()
+    report = open_case(client, rego)
+    case_id = report["case_id"]
+
+    asked = _answer_every_question(client, case_id, limit=3)
+    assert asked, f"{rego} was asked nothing at all"
+
+    checks = [q for q in asked if q["id"].startswith("q_check_")]
+    assert checks, f"{rego} only ever got {[q['id'] for q in asked]} — no part-specific question"
+
+    # Whatever it names has to be a real part of *this* vehicle, not boilerplate.
+    from app.catalogue import registry
+
+    slug = cases.get_vehicle(report["vehicle"]["vehicle_id"]).slug
+    catalogue = registry.get(slug)
+    for question in checks:
+        part = catalogue.by_id.get(question["id"].removeprefix("q_check_"))
+        assert part is not None
+        assert part.name in question["text"]
     cases.reset()
 
 

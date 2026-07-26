@@ -93,6 +93,39 @@ export const Fonts = Platform.select({
   },
 });
 
+/**
+ * The intake screen's own palette and faces.
+ *
+ * Kept beside the app tokens rather than folded into them: this screen is a
+ * deliberately quieter, editorial treatment — paper-white, hairline rules, one
+ * accent — and flattening it into `Colors` would drag the rest of the app with
+ * it. Values are the redesign spec's, verbatim.
+ */
+export const Intake = {
+  accent: '#4B47FF',
+  ink: '#15141A',
+  body: '#6F6D6A',
+  mutedLabel: '#B0AEAA',
+  /** Footer rule, idle input underline, chip border — three different weights. */
+  ruleFooter: '#F0EEEA',
+  ruleInput: '#DCDAD6',
+  ruleChip: '#E8E6E2',
+  buttonIdle: '#F2F1EE',
+  buttonIdleText: '#ADABA7',
+  chipVehicle: '#3A383F',
+  page: '#FFFFFF',
+  /** 22px either side, everywhere on the screen. */
+  gutter: 22,
+} as const;
+
+/** The three faces, by the names `useFonts` registered them under. */
+export const Faces = {
+  headline: 'Newsreader_400Regular',
+  sans: 'DMSans_400Regular',
+  sansMedium: 'DMSans_500Medium',
+  plate: 'IBMPlexMono_500Medium',
+} as const;
+
 export const Spacing = {
   half: 2,
   one: 4,

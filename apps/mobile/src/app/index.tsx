@@ -178,6 +178,9 @@ export default function HomeScreen() {
         options={{
           title,
           headerTitleAlign: 'center',
+          // The intake screen draws its own header — an eyebrow label and the
+          // menu button — so the nav bar would be a second one above it.
+          headerShown: step === 'report',
           // Back once there is a step to go back to, the drawer otherwise. The three
           // steps live on one route, so this walks them rather than popping a screen.
           headerLeft: () =>
@@ -225,7 +228,7 @@ export default function HomeScreen() {
         <ThemedView style={styles.container}>
           {step === 'rego' ? (
             // --- 1. which vehicle? ------------------------------------------
-            <RegoEntry onRegistered={onRegistered} />
+            <RegoEntry onRegistered={onRegistered} onOpenMenu={() => setMenuOpen(true)} />
           ) : step === 'photos' && pending ? (
             // --- 2. the photos, and the analysis they start -----------------
             <DamageCapture
@@ -240,6 +243,8 @@ export default function HomeScreen() {
               onMicPress={toggleRecording}
               micActive={voice.isRecording}
               micDisabled={voice.status === 'unavailable' || kase.transcribing}
+              onBack={() => setStep('rego')}
+              onNewAssessment={reset}
             />
           ) : (
             // --- 3. what was found ------------------------------------------
