@@ -213,6 +213,10 @@ export function ResultsScreen({
               confirmed={line.confirmed != null || tab === 'confirmed'}
               busy={busyId === line.part_id}
               onConfirm={tab === 'confirmed' ? undefined : () => onConfirm(line.part_id, true)}
+              // `false` is "I looked, it is fine" — the engine clamps it to zero and drops
+              // the part from the report entirely. Available on both tabs: a confirmed row
+              // needs it most, since otherwise a wrong call reaches the customer's quote.
+              onRemove={() => onConfirm(line.part_id, false)}
               // Only a fraction of diagrams ship an image; the rest have no
               // toggle rather than a toggle that opens nothing.
               diagramUrl={

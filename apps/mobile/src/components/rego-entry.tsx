@@ -180,7 +180,7 @@ export function RegoEntry({
             {/* One upright weight, one colour. The intake screen sets its
                 headline the same way, and two screens a tap apart should not
                 disagree about what a headline is. */}
-            <PageTitle size={42}>Enter the rego to start.</PageTitle>
+            <PageTitle size={30} style={styles.centred}>Enter the rego to start.</PageTitle>
             <ThemedText style={styles.body}>
               One plate is enough. We&rsquo;ll bring up the vehicle and everything already
               known about it.
@@ -276,14 +276,15 @@ const styles = StyleSheet.create({
 
   main: { paddingTop: 76, paddingHorizontal: Intake.gutter, gap: 52, paddingBottom: 24 },
 
-  brandGroup: { gap: 22 },
+  brandGroup: { gap: 22, alignItems: 'center' },
   // 403×156 source. Sized to roughly the cap height the set wordmark occupied, so the
   // rest of the hero's rhythm is unchanged.
   wordmark: {
-    width: 150,
+    width: 232,
     aspectRatio: 403 / 156,
   },
-  copyGroup: { gap: 16 },
+  copyGroup: { gap: 16, alignItems: 'center' },
+  centred: { textAlign: 'center' },
   headline: {
     fontFamily: Faces.headline,
     fontSize: 42,

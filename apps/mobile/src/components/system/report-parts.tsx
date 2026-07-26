@@ -92,6 +92,14 @@ export interface PartCardProps {
   reasoning?: string;
   confirmed?: boolean;
   onConfirm?: () => void;
+  /**
+   * Take the part off the list.
+   *
+   * Every row needs this, confirmed ones most of all: the camera is not always right, and a
+   * confirmed row with no way out means the quote goes to the customer carrying a part they
+   * do not need.
+   */
+  onRemove?: () => void;
   busy?: boolean;
   /** Tints the card when the last answer moved this row. */
   moved?: boolean;
@@ -113,6 +121,7 @@ export function PartCard({
   reasoning,
   confirmed,
   onConfirm,
+  onRemove,
   busy,
   moved,
   diagramUrl,
@@ -133,6 +142,22 @@ export function PartCard({
         </View>
       )}
 
+      {/* A confirmed row shows no percentage — it is a fact, not a prediction — so the ✕
+          is its only control, sitting where the number would have been. */}
+      {confirmed && onRemove ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Remove ${name} — not actually damaged`}
+          accessibilityState={{ disabled: busy }}
+          disabled={busy}
+          onPress={onRemove}
+          hitSlop={10}
+          style={({ pressed }) => [styles.remove, { opacity: pressed || busy ? 0.5 : 1 }]}
+        >
+          <ThemedText style={styles.removeGlyph}>✕</ThemedText>
+        </Pressable>
+      ) : null}
+
       <View style={styles.cardBody}>
         <ThemedText style={styles.cardName} numberOfLines={2}>
           {name}
@@ -150,22 +175,40 @@ export function PartCard({
                 {reasoning}
               </ThemedText>
             ) : null}
-            {onConfirm ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`Confirm ${name} is damaged`}
-                accessibilityState={{ disabled: busy }}
-                disabled={busy}
-                onPress={onConfirm}
-                hitSlop={10}
-                style={({ pressed }) => [
-                  styles.confirmLink,
-                  { opacity: pressed || busy ? 0.6 : 1 },
-                ]}
-              >
-                <ThemedText style={styles.confirmText}>Confirm damage →</ThemedText>
-              </Pressable>
-            ) : null}
+            <View style={styles.actions}>
+              {onConfirm ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Confirm ${name} is damaged`}
+                  accessibilityState={{ disabled: busy }}
+                  disabled={busy}
+                  onPress={onConfirm}
+                  hitSlop={10}
+                  style={({ pressed }) => [
+                    styles.confirmLink,
+                    { opacity: pressed || busy ? 0.6 : 1 },
+                  ]}
+                >
+                  <ThemedText style={styles.confirmText}>Confirm damage →</ThemedText>
+                </Pressable>
+              ) : null}
+              {onRemove ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Rule out ${name} — not damaged`}
+                  accessibilityState={{ disabled: busy }}
+                  disabled={busy}
+                  onPress={onRemove}
+                  hitSlop={10}
+                  style={({ pressed }) => [
+                    styles.confirmLink,
+                    { opacity: pressed || busy ? 0.6 : 1 },
+                  ]}
+                >
+                  <ThemedText style={styles.dismissText}>Not damaged</ThemedText>
+                </Pressable>
+              ) : null}
+            </View>
           </>
         )}
 
@@ -301,6 +344,17 @@ const styles = StyleSheet.create({
   // Capped so a long label does not stretch the tap target the width of the card.
   confirmLink: { minHeight: 28, maxWidth: 160, justifyContent: 'center' },
   confirmText: { fontFamily: Faces.sansMedium, fontSize: 12.5, color: Intake.accent },
+  // Both actions on one line; the accent stays on the one that adds to the order, so
+  // "Not damaged" reads as the quieter of the two.
+  actions: { flexDirection: 'row', alignItems: 'center', gap: 18 },
+  dismissText: { fontFamily: Faces.sansMedium, fontSize: 12.5, color: Intake.secondary },
+  remove: {
+    width: 34,
+    height: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  removeGlyph: { fontFamily: Faces.sansMedium, fontSize: 15, color: Intake.secondary },
   diagramToggle: {
     flexDirection: 'row',
     alignItems: 'center',
