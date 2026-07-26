@@ -18,9 +18,8 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, StyleSheet } from 'react-native';
+import { KeyboardAvoidingView, Platform, StyleSheet } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
 
 import { ResultsScreen } from '@/components/system/results-screen';
 import { DamageCapture } from '@/components/damage-capture';
@@ -30,7 +29,6 @@ import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { toErrorInfo } from '@/hooks/use-async-data';
 import { useCase, type ErrorInfo, type MediaFile } from '@/hooks/use-case';
-import { useTheme } from '@/hooks/use-theme';
 import { useVoiceCapture } from '@/hooks/use-voice-capture';
 import { backend, waitForVehicleReady } from '@/lib/backend';
 import { rememberCase } from '@/lib/recent-cases';
@@ -40,7 +38,6 @@ type Step = 'rego' | 'photos' | 'report';
 
 export default function HomeScreen() {
   const router = useRouter();
-  const theme = useTheme();
   const voice = useVoiceCapture();
 
   const [step, setStep] = useState<Step>('rego');
@@ -149,55 +146,12 @@ export default function HomeScreen() {
   // The report already names the vehicle in its own masthead, so repeating it in
   // the nav bar was the same words twice and crowded the back arrow. The header
   // stays empty once a job is under way; only the entry screen is branded.
-  const title = step === 'rego' ? 'Partli' : '';
 
   return (
     <>
-      <Stack.Screen
-        options={{
-          title,
-          headerTitleAlign: 'center',
-          // The intake screen draws its own header — an eyebrow label and the
-          // menu button — so the nav bar would be a second one above it.
-          headerShown: step === 'report',
-          // Back once there is a step to go back to, the drawer otherwise. The three
-          // steps live on one route, so this walks them rather than popping a screen.
-          headerLeft: () =>
-            step === 'rego' ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Open recent cases"
-                onPress={() => setMenuOpen(true)}
-                hitSlop={12}
-                style={styles.headerButton}
-              >
-                <Ionicons name="menu" size={24} color={theme.accent} />
-              </Pressable>
-            ) : (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={step === 'report' ? 'Back to adding damage' : 'Back to the rego'}
-                onPress={() => setStep(step === 'report' ? 'photos' : 'rego')}
-                hitSlop={12}
-                style={styles.headerButton}
-              >
-                <Ionicons name="chevron-back" size={26} color={theme.accent} />
-              </Pressable>
-            ),
-          headerRight: () =>
-            step !== 'rego' ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Start another vehicle"
-                onPress={reset}
-                hitSlop={12}
-                style={styles.headerButton}
-              >
-                <Ionicons name="add" size={24} color={theme.accent} />
-              </Pressable>
-            ) : null,
-        }}
-      />
+      {/* Every step draws its own header from the design system, so the nav
+          bar would be a second chevron and a second "+" stacked above it. */}
+      <Stack.Screen options={{ headerShown: false }} />
 
       <KeyboardAvoidingView
         style={styles.container}
@@ -256,7 +210,6 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  headerButton: { paddingHorizontal: Spacing.two },
 
   // Crop-marked like the cards above it, so the composer reads as the last
   // block of the list rather than a separate toolbar bolted underneath.
