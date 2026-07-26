@@ -26,32 +26,30 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  TextInput,
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 
-import Animated, {
-  interpolateColor,
-  useAnimatedStyle,
-  useDerivedValue,
-  withTiming,
-} from 'react-native-reanimated';
-
-
 import { ThemedText } from '@/components/themed-text';
+import { IntakeComposer } from '@/components/intake-composer';
+import {
+  IconChip,
+  ListRow,
+  PageTitle,
+  Rule,
+  ScreenHeader,
+  SectionLabel,
+  VehicleLine,
+} from '@/components/system/primitives';
 import { PropagationGraph } from '@/components/PropagationGraph';
-import { Faces, Intake, NoFocusRing, Radius, Spacing, TapTarget } from '@/constants/theme';
+import { Faces, Intake, Radius, Spacing, TapTarget } from '@/constants/theme';
 import { toErrorInfo } from '@/hooks/use-async-data';
 import type { ErrorInfo, MediaFile } from '@/hooks/use-case';
 import { useTheme } from '@/hooks/use-theme';
 import type { VehiclePayload } from '@/lib/backend';
 
 const BEAT_MS = 700;
-
-/** The home screen's 150ms ease, so the two screens agree. */
-const ACCENT_MS = 150;
 
 // No cap on how many photos go with a case. A repairer walks a wrecked car and
 // shoots every angle; the count is whatever the damage takes. The backend has
@@ -89,50 +87,6 @@ export interface DamageCaptureProps {
   onNewAssessment: () => void;
 }
 
-/**
- * One way in, on the evidence list. Icon chip, title over meta, one arrow.
- *
- * The chip's shape says what kind of evidence it is before the label does —
- * square for stills, round for video, dashed for the no-media path.
- */
-function EvidenceRow({
-  icon,
-  chipShape,
-  title,
-  meta,
-  onPress,
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  chipShape: 'square' | 'round' | 'dashed';
-  title: string;
-  meta: string;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`${title}. ${meta}`}
-      onPress={onPress}
-      style={({ pressed }) => [styles.evidenceRow, { opacity: pressed ? 0.6 : 1 }]}
-    >
-      <View
-        style={[
-          styles.evidenceChip,
-          chipShape === 'round' && styles.evidenceChipRound,
-          chipShape === 'dashed' && styles.evidenceChipDashed,
-        ]}
-      >
-        <Ionicons name={icon} size={12} color={Intake.mutedLabel} />
-      </View>
-      <View style={styles.evidenceCopy}>
-        <ThemedText style={styles.evidenceTitle}>{title}</ThemedText>
-        <ThemedText style={styles.evidenceMeta}>{meta}</ThemedText>
-      </View>
-      <ThemedText style={styles.footerArrow}>→</ThemedText>
-    </Pressable>
-  );
-}
-
 export function DamageCapture({
   vehicle,
   rego,
@@ -161,25 +115,6 @@ export function DamageCapture({
   // Analyse lights up on the first character *or* the first attachment — the
   // spec's rule is "empty AND no media", so a photo alone is enough to submit.
   const armed = draft.trim().length > 0 || attachments.length > 0;
-  const accent = useDerivedValue(() => withTiming(armed ? 1 : 0, { duration: ACCENT_MS }));
-  const underlineStyle = useAnimatedStyle(() => ({
-    borderBottomColor: interpolateColor(
-      accent.value,
-      [0, 1],
-      [Intake.ruleInput, Intake.accent],
-    ),
-  }));
-  const analyseFill = useAnimatedStyle(() => ({
-    backgroundColor: interpolateColor(
-      accent.value,
-      [0, 1],
-      [Intake.buttonIdle, Intake.accent],
-    ),
-  }));
-  const analyseText = useAnimatedStyle(() => ({
-    color: interpolateColor(accent.value, [0, 1], [Intake.buttonIdleText, '#FFFFFF']),
-  }));
-
   // Held work, released by the effect below once the case exists. Kept in a ref
   // so the effect does not re-fire on every keystroke.
   const pendingSend = useRef<null | (() => void)>(null);
@@ -313,27 +248,12 @@ export function DamageCapture({
    * whole point of showing it here instead of on a loading screen.
    */
   const screenHeader = (
-    <View style={styles.screenHeader}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Back to the rego"
-        onPress={onBack}
-        hitSlop={12}
-        style={styles.headerTap}
-      >
-        <Ionicons name="chevron-back" size={20} color={Intake.accent} />
-      </Pressable>
-      <ThemedText style={styles.eyebrow}>Damage intake</ThemedText>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Start another assessment"
-        onPress={onNewAssessment}
-        hitSlop={12}
-        style={[styles.headerTap, styles.headerTapEnd]}
-      >
-        <Ionicons name="add" size={20} color={Intake.accent} />
-      </Pressable>
-    </View>
+    <ScreenHeader
+      onBack={onBack}
+      backLabel="Back to the rego"
+      onAction={onNewAssessment}
+      actionLabel="Start another assessment"
+    />
   );
 
   /**
@@ -343,39 +263,32 @@ export function DamageCapture({
    * lands last. None of it gates adding photos — which is the whole reason it
    * is a line here rather than a loading screen in front.
    */
-  const vehicleRow = (
+  const vehicleRow = trackError ? (
     <View style={styles.vehicleRow}>
-      {trackError ? (
-        <>
-          <Ionicons name="alert-circle" size={15} color={theme.danger} />
-          <ThemedText style={[styles.vehicleName, { color: theme.danger }]}>
-            {trackError.title}
-          </ThemedText>
-        </>
-      ) : ready ? (
-        <>
-          <View style={styles.successDot}>
-            <Ionicons name="checkmark" size={10} color="#FFFFFF" />
-          </View>
-          <ThemedText style={styles.vehicleName}>
-            {[vehicle?.year, vehicle?.make, vehicle?.model].filter(Boolean).join(' ')}
-          </ThemedText>
-          <ThemedText style={styles.plate}>{vehicle?.rego ?? rego}</ThemedText>
-          <ThemedText style={styles.vehicleMeta}>
-            {vehicle?.parts_indexed?.toLocaleString() ?? 0} parts loaded
-          </ThemedText>
-        </>
-      ) : (
-        <>
-          <ActivityIndicator size="small" color={Intake.accent} />
-          <ThemedText style={styles.plate}>{rego}</ThemedText>
-          <ThemedText style={styles.vehicleMeta}>
-            {vehicle && vehicle.status !== 'resolving'
-              ? 'Loading OEM catalogue…'
-              : 'Resolving VIN…'}
-          </ThemedText>
-        </>
-      )}
+      <Ionicons name="alert-circle" size={15} color={theme.danger} />
+      <ThemedText style={[styles.vehicleName, { color: theme.danger }]}>
+        {trackError.title}
+      </ThemedText>
+    </View>
+  ) : ready ? (
+    <VehicleLine
+      confirmed
+      name={[vehicle?.year, vehicle?.make, vehicle?.model].filter(Boolean).join(' ')}
+      plate={vehicle?.rego ?? rego}
+      meta={`${vehicle?.parts_indexed?.toLocaleString() ?? 0} parts loaded`}
+    />
+  ) : (
+    <View style={styles.vehicleRow}>
+      <ActivityIndicator size="small" color={Intake.accent} />
+      <VehicleLine
+        name=""
+        plate={rego}
+        meta={
+          vehicle && vehicle.status !== 'resolving'
+            ? 'Loading OEM catalogue…'
+            : 'Resolving VIN…'
+        }
+      />
     </View>
   );
 
@@ -434,7 +347,7 @@ export function DamageCapture({
         {screenHeader}
         <ScrollView contentContainerStyle={styles.analysing} keyboardShouldPersistTaps="handled">
           {vehicleRow}
-          <ThemedText style={styles.headline}>Analysing the damage…</ThemedText>
+          <PageTitle size={34}>Analysing the damage…</PageTitle>
           {attachments.length > 0 ? thumbnails(true) : null}
           <View style={styles.graph}>
             <PropagationGraph />
@@ -461,60 +374,28 @@ export function DamageCapture({
       >
         <View style={styles.contextGroup}>
           {vehicleRow}
-          <View style={styles.rule} />
-          <ThemedText style={styles.headline}>Add the damage to start the analysis.</ThemedText>
+          <Rule />
+          <PageTitle size={40}>Add the damage to start the analysis.</PageTitle>
           <ThemedText style={styles.body}>
             Photos read best, but a sentence about what happened is enough to begin.
           </ThemedText>
         </View>
 
         <View style={styles.inputGroup}>
-          <Animated.View style={[styles.field, underlineStyle]}>
-            <TextInput
-              value={draft}
-              onChangeText={setDraft}
-              onSubmitEditing={send}
-              placeholder="Describe the damage"
-              placeholderTextColor={Intake.mutedLabel}
-              accessibilityLabel="Describe the damage"
-              style={styles.input}
-            />
-            {onMicPress ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Dictate"
-                accessibilityState={{ disabled: micDisabled, selected: micActive }}
-                disabled={micDisabled}
-                onPress={onMicPress}
-                hitSlop={12}
-                style={({ pressed }) => [
-                  styles.dictate,
-                  {
-                    borderColor: micActive || pressed ? Intake.accent : Intake.ruleChip,
-                    opacity: micDisabled ? 0.4 : 1,
-                  },
-                ]}
-              >
-                <Ionicons
-                  name={micActive ? 'stop' : 'mic'}
-                  size={13}
-                  color={micActive ? Intake.accent : Intake.mutedLabel}
-                />
-              </Pressable>
-            ) : null}
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Analyse"
-              // Announced as well as greyed: colour alone is not the signal.
-              accessibilityState={{ disabled: !armed }}
-              disabled={!armed}
-              onPress={send}
-              style={({ pressed }) => [styles.analyse, { opacity: pressed ? 0.8 : 1 }]}
-            >
-              <Animated.View style={[StyleSheet.absoluteFill, styles.analyseFill, analyseFill]} />
-              <Animated.Text style={[styles.analyseText, analyseText]}>Analyse</Animated.Text>
-            </Pressable>
-          </Animated.View>
+          <IntakeComposer
+            value={draft}
+            onChangeText={setDraft}
+            onSubmit={send}
+            placeholder="Describe the damage, or attach crash photos"
+            hint="Photos, video or text"
+            onAttach={() => void pickFromLibrary('images')}
+            attachLabel="Add crash photos"
+            canSend={armed}
+            onDictate={onMicPress}
+            dictateActive={micActive}
+            dictateDisabled={micDisabled}
+            submitLabel="Analyse"
+          />
 
           {/* Whatever is already attached, in the treatment the upload path
               already uses — thumbnails with a remove affordance. */}
@@ -528,24 +409,23 @@ export function DamageCapture({
           ) : null}
 
           <View>
-            <ThemedText style={styles.evidenceLabel}>Or add evidence</ThemedText>
-            <EvidenceRow
-              icon="square-outline"
-              chipShape="square"
+            <View style={styles.evidenceLabel}>
+              <SectionLabel>Or add evidence</SectionLabel>
+            </View>
+            <ListRow
+              leading={<IconChip icon="square-outline" shape="square" />}
               title="Add crash photos"
               meta="Pick several at once"
               onPress={() => void pickFromLibrary('images')}
             />
-            <EvidenceRow
-              icon="play"
-              chipShape="round"
+            <ListRow
+              leading={<IconChip icon="play" shape="round" />}
               title="Add a walkaround video"
               meta="20–30 seconds, slow pan"
               onPress={() => void pickFromLibrary('videos')}
             />
-            <EvidenceRow
-              icon="flash-outline"
-              chipShape="dashed"
+            <ListRow
+              leading={<IconChip icon="flash-outline" shape="dashed" />}
               title="Skip photos and predict now"
               meta="Lower confidence on the first pass"
               onPress={skip}
@@ -553,23 +433,6 @@ export function DamageCapture({
           </View>
         </View>
       </ScrollView>
-
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="What makes a good crash photo?"
-        onPress={() =>
-          setError({
-            title: 'What makes a good crash photo?',
-            detail:
-              'One wide shot of the whole corner, then one close on each damaged panel. ' +
-              'Daylight, no flash, and get the plate in one of them.',
-          })
-        }
-        style={({ pressed }) => [styles.footer, { opacity: pressed ? 0.6 : 1 }]}
-      >
-        <ThemedText style={styles.footerText}>What makes a good crash photo?</ThemedText>
-        <ThemedText style={styles.footerArrow}>→</ThemedText>
-      </Pressable>
 
     </View>
   );
@@ -588,13 +451,6 @@ const styles = StyleSheet.create({
   // 20px glyphs inside 44pt targets, without widening the visual header.
   headerTap: { width: TapTarget - 12, height: TapTarget - 12, justifyContent: 'center' },
   headerTapEnd: { alignItems: 'flex-end' },
-  eyebrow: {
-    fontFamily: Faces.sansMedium,
-    fontSize: 11,
-    letterSpacing: 1.76,
-    textTransform: 'uppercase',
-    color: Intake.mutedLabel,
-  },
 
   main: { paddingTop: 96, gap: 60, paddingHorizontal: Intake.gutter, paddingBottom: 24 },
   analysing: {
@@ -610,7 +466,7 @@ const styles = StyleSheet.create({
     width: 15,
     height: 15,
     borderRadius: 999,
-    backgroundColor: '#1F9D63',
+    backgroundColor: Intake.success,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -626,9 +482,10 @@ const styles = StyleSheet.create({
 
   headline: {
     fontFamily: Faces.headline,
-    fontSize: 38,
-    lineHeight: 40, // 1.06
-    letterSpacing: -0.57, // -.015em
+    fontSize: 40,
+    lineHeight: 41, // 1.02
+    letterSpacing: 0.2, // .005em
+    textTransform: 'uppercase',
     color: Intake.ink,
   },
   body: {
@@ -640,36 +497,6 @@ const styles = StyleSheet.create({
   },
 
   inputGroup: { gap: 36 },
-  field: { flexDirection: 'row', alignItems: 'flex-end', gap: 12, borderBottomWidth: 1.5 },
-  input: {
-    flex: 1,
-    fontFamily: Faces.sansMedium,
-    fontSize: 16,
-    lineHeight: 21, // 1.3
-    color: Intake.ink,
-    paddingBottom: 12,
-    ...NoFocusRing,
-  },
-  dictate: {
-    width: 26,
-    height: 26,
-    borderRadius: 999,
-    borderWidth: 1,
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 10,
-  },
-  analyse: {
-    borderRadius: 999,
-    paddingHorizontal: 20,
-    paddingVertical: 11,
-    marginBottom: 8,
-    overflow: 'hidden',
-    justifyContent: 'center',
-  },
-  analyseFill: { borderRadius: 999 },
-  analyseText: { fontFamily: Faces.sansMedium, fontSize: 13 },
 
   evidenceLabel: {
     fontFamily: Faces.sansMedium,
@@ -694,7 +521,7 @@ const styles = StyleSheet.create({
     borderRadius: 7,
     borderWidth: 1,
     borderColor: Intake.ruleChip,
-    backgroundColor: '#F6F5F2',
+    backgroundColor: Intake.chipFill,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -745,18 +572,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
 
-  footer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginHorizontal: Intake.gutter,
-    marginBottom: 28,
-    paddingTop: 18,
-    minHeight: 44,
-    borderTopWidth: 1,
-    borderTopColor: Intake.ruleFooter,
-  },
-  footerText: { fontFamily: Faces.sans, fontSize: 12.5, color: Intake.body },
   footerArrow: { fontSize: 15, color: Intake.accent },
 
 });

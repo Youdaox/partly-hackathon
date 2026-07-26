@@ -18,17 +18,14 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, StyleSheet } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
-import { CaseReportView } from '@/components/case-report';
-import { Composer } from '@/components/composer';
+import { ResultsScreen } from '@/components/system/results-screen';
 import { DamageCapture } from '@/components/damage-capture';
 import { RecentDrawer } from '@/components/recent-drawer';
 import { RegoEntry } from '@/components/rego-entry';
-import { Framed } from '@/components/framed';
-import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { toErrorInfo } from '@/hooks/use-async-data';
@@ -51,9 +48,7 @@ export default function HomeScreen() {
   const [pending, setPending] = useState<{ vehicleId: string; rego: string } | null>(null);
   const [caseId, setCaseId] = useState<string | null>(null);
   const [track, setTrack] = useState<ErrorInfo | null>(null);
-  const [draft, setDraft] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
-  const [expanded, setExpanded] = useState<string | null>(null);
 
   const kase = useCase(caseId, pending?.vehicleId ?? null);
 
@@ -61,12 +56,6 @@ export default function HomeScreen() {
    * How many parts are settled enough to quote: everything the camera saw, plus anything
    * ticked ✓. It is the number the review screen will open with, so the button says it.
    */
-  const confirmedCount = kase.report
-    ? kase.report.sections.visible.length +
-      [...kase.report.sections.order, ...kase.report.sections.check].filter(
-        (line) => line.confirmed === true,
-      ).length
-    : 0;
 
   /**
    * Step 1 done — the plate was accepted, and that is all. The VIN, the
@@ -146,17 +135,7 @@ export default function HomeScreen() {
     setCaseId(null);
     setTrack(null);
     setStep('rego');
-    setDraft('');
-    setExpanded(null);
   }, []);
-
-  /** In the report step the composer is a follow-up, nothing more. */
-  const askFollowUp = useCallback(() => {
-    const text = draft.trim();
-    if (!text) return;
-    void kase.ask(text);
-    setDraft('');
-  }, [draft, kase]);
 
   const toggleRecording = useCallback(async () => {
     if (voice.isRecording) {
@@ -228,7 +207,11 @@ export default function HomeScreen() {
         <ThemedView style={styles.container}>
           {step === 'rego' ? (
             // --- 1. which vehicle? ------------------------------------------
-            <RegoEntry onRegistered={onRegistered} onOpenMenu={() => setMenuOpen(true)} />
+            <RegoEntry
+              onRegistered={onRegistered}
+              onOpenMenu={() => setMenuOpen(true)}
+              dictateDisabled={voice.status === 'unavailable'}
+            />
           ) : step === 'photos' && pending ? (
             // --- 2. the photos, and the analysis they start -----------------
             <DamageCapture
@@ -248,51 +231,20 @@ export default function HomeScreen() {
             />
           ) : (
             // --- 3. what was found ------------------------------------------
-            <CaseReportView
+            <ResultsScreen
               report={kase.report}
               loading={kase.loading}
               vehicle={kase.vehicle}
               error={kase.error}
-              said={kase.transcript ?? undefined}
               busyId={kase.busyId}
               answering={kase.answering}
-              expanded={expanded}
-              onToggleExpanded={setExpanded}
               onConfirm={kase.confirm}
               onAnswer={kase.answer}
+              onBack={() => setStep('photos')}
+              onNewAssessment={reset}
+              onReviewAndConfirm={() => caseId && router.push(`/case/${caseId}/send`)}
             />
           )}
-
-          {/* The follow-up composer belongs to the report only: before there is
-              a report there is nothing to follow up on, and offering a text box
-              next to the plate field is what made the old screen ambiguous. */}
-          {step === 'report' && caseId ? (
-            <Framed style={styles.dock}>
-              <Composer
-                value={draft}
-                onChangeText={setDraft}
-                onSubmit={askFollowUp}
-                placeholder={kase.transcribing ? 'Transcribing…' : 'Ask a follow-up…'}
-                busy={kase.asking || kase.transcribing || kase.attaching}
-                onMicPress={toggleRecording}
-                micActive={voice.isRecording}
-                micDisabled={voice.status === 'unavailable' || kase.transcribing}
-              />
-              <View style={styles.dockLinks}>
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={() => router.push(`/case/${caseId}/send`)}
-                  style={({ pressed }) => [styles.dockLink, { opacity: pressed ? 0.6 : 1 }]}
-                >
-                  <ThemedText type="smallBold" style={{ color: theme.accent }}>
-                    Review &amp; confirm list
-                    {confirmedCount > 0 ? ` (${confirmedCount})` : ''}
-                  </ThemedText>
-                  <Ionicons name="chevron-forward" size={15} color={theme.accent} />
-                </Pressable>
-              </View>
-            </Framed>
-          ) : null}
         </ThemedView>
       </KeyboardAvoidingView>
 

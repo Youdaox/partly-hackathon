@@ -17,35 +17,55 @@
  */
 
 import { useCallback, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
-import Animated, {
-  interpolateColor,
-  useAnimatedStyle,
-  useDerivedValue,
-  withTiming,
-} from 'react-native-reanimated';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
+import { IntakeComposer } from '@/components/intake-composer';
+import {
+  FooterBar,
+  PageTitle,
+  ScreenHeader,
+  SectionLabel,
+} from '@/components/system/primitives';
 import { ThemedText } from '@/components/themed-text';
-import { Faces, Intake, NoFocusRing, TapTarget } from '@/constants/theme';
+import { Faces, Intake, TapTarget } from '@/constants/theme';
 import { toErrorInfo, useAsyncData } from '@/hooks/use-async-data';
 import type { ErrorInfo } from '@/hooks/use-case';
 import { backend } from '@/lib/backend';
 import { listRecentCases } from '@/lib/recent-cases';
 
-/** The spec's 150ms ease, shared by the underline and the button. */
-const ACCENT_MS = 150;
+/** Recents are a shortcut, not a directory. */
+const MAX_RECENTS = 3;
 
-/** Chips are a shortcut, not a directory. */
-const MAX_CHIPS = 3;
+/** "2d ago" rather than a date — how long ago is the only part that matters. */
+function agoLabel(iso: string | undefined): string {
+  if (!iso) return '';
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return '';
+  const days = Math.floor((Date.now() - then) / 86_400_000);
+  if (days <= 0) return 'today';
+  if (days === 1) return '1d ago';
+  if (days < 7) return `${days}d ago`;
+  const weeks = Math.floor(days / 7);
+  return weeks < 5 ? `${weeks}w ago` : `${Math.floor(days / 30)}mo ago`;
+}
 
 export interface RegoEntryProps {
   /** Fired as soon as the plate is accepted — before the VIN comes back. */
   onRegistered: (vehicleId: string, rego: string) => void;
   /** The header's menu button; the drawer itself lives on the parent screen. */
   onOpenMenu: () => void;
+  onDictate?: () => void;
+  dictateActive?: boolean;
+  dictateDisabled?: boolean;
 }
 
-export function RegoEntry({ onRegistered, onOpenMenu }: RegoEntryProps) {
+export function RegoEntry({
+  onRegistered,
+  onOpenMenu,
+  onDictate,
+  dictateActive,
+  dictateDisabled,
+}: RegoEntryProps) {
   const [draft, setDraft] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<ErrorInfo | null>(null);
@@ -62,40 +82,28 @@ export function RegoEntry({ onRegistered, onOpenMenu }: RegoEntryProps) {
    * never blank, and "pick up where you left off" is true whenever there is
    * anything to pick up.
    */
-  const chips = useMemo(() => {
+  const recents = useMemo(() => {
     const startable = (vehicles.data ?? []).filter((vehicle) => vehicle.has_catalogue);
-    const recentPlates = listRecentCases()
-      .map((entry) => entry.label.split('·').pop()?.trim().toUpperCase())
-      .filter((plate): plate is string => Boolean(plate));
+    // `label` is written as "Make Model · REGO" when a case is remembered.
+    const openedAt = new Map<string, string>();
+    for (const entry of listRecentCases()) {
+      const plate = entry.label.split('·').pop()?.trim().toUpperCase();
+      if (plate && !openedAt.has(plate)) openedAt.set(plate, entry.openedAt);
+    }
     const rank = (rego: string) => {
-      const seen = recentPlates.indexOf(rego.toUpperCase());
+      const seen = [...openedAt.keys()].indexOf(rego.toUpperCase());
       return seen === -1 ? Number.MAX_SAFE_INTEGER : seen;
     };
-    return [...startable].sort((a, b) => rank(a.rego) - rank(b.rego)).slice(0, MAX_CHIPS);
+    return [...startable]
+      .sort((a, b) => rank(a.rego) - rank(b.rego))
+      .slice(0, MAX_RECENTS)
+      .map((vehicle) => ({
+        ...vehicle,
+        // Only genuine recents have an age; the rest are here to fill the list
+        // and saying "today" about them would be an invention.
+        age: agoLabel(openedAt.get(vehicle.rego.toUpperCase())),
+      }));
   }, [vehicles.data]);
-
-  const filled = draft.trim().length > 0;
-  // One shared 0→1 drives the underline and the button together, so they never
-  // disagree about whether the field has something in it.
-  const accent = useDerivedValue(() => withTiming(filled ? 1 : 0, { duration: ACCENT_MS }));
-
-  const underlineStyle = useAnimatedStyle(() => ({
-    borderBottomColor: interpolateColor(
-      accent.value,
-      [0, 1],
-      [Intake.ruleInput, Intake.accent],
-    ),
-  }));
-  const buttonStyle = useAnimatedStyle(() => ({
-    backgroundColor: interpolateColor(
-      accent.value,
-      [0, 1],
-      [Intake.buttonIdle, Intake.accent],
-    ),
-  }));
-  const buttonTextStyle = useAnimatedStyle(() => ({
-    color: interpolateColor(accent.value, [0, 1], [Intake.buttonIdleText, '#FFFFFF']),
-  }));
 
   const lookUp = useCallback(
     async (plate: string) => {
@@ -120,6 +128,21 @@ export function RegoEntry({ onRegistered, onOpenMenu }: RegoEntryProps) {
     [onRegistered, submitting],
   );
 
+  /**
+   * The composer's "+".
+   *
+   * Reading a plate off a photo needs OCR, and there is none — no endpoint and
+   * no on-device model. Opening a picker that leads nowhere would be worse than
+   * saying so, so the button explains itself and points at what does work.
+   * Wire a plate reader in and this becomes the capture the spec describes.
+   */
+  const scanPlate = useCallback(() => {
+    setError({
+      title: 'Plate capture is not wired up yet',
+      detail: 'Type the rego, or pick one of the recents below.',
+    });
+  }, []);
+
   const showAssessable = useCallback(() => {
     const startable = (vehicles.data ?? []).filter((vehicle) => vehicle.has_catalogue);
     setError({
@@ -134,19 +157,7 @@ export function RegoEntry({ onRegistered, onOpenMenu }: RegoEntryProps) {
 
   return (
     <View style={styles.page}>
-      <View style={styles.header}>
-        <ThemedText style={styles.eyebrow}>Vehicle intake</ThemedText>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Open recent cases"
-          onPress={onOpenMenu}
-          hitSlop={12}
-          style={({ pressed }) => [styles.menuButton, { opacity: pressed ? 0.5 : 1 }]}
-        >
-          <View style={styles.menuBar} />
-          <View style={styles.menuBar} />
-        </Pressable>
-      </View>
+      <ScreenHeader onAction={onOpenMenu} actionLabel="Open recent cases" actionIcon="menu" />
 
       <ScrollView
         contentContainerStyle={styles.main}
@@ -162,7 +173,7 @@ export function RegoEntry({ onRegistered, onOpenMenu }: RegoEntryProps) {
             {/* One upright weight, one colour. The intake screen sets its
                 headline the same way, and two screens a tap apart should not
                 disagree about what a headline is. */}
-            <ThemedText style={styles.headline}>Enter the rego to start.</ThemedText>
+            <PageTitle size={42}>Enter the rego to start.</PageTitle>
             <ThemedText style={styles.body}>
               One plate is enough. We&rsquo;ll bring up the vehicle and everything already
               known about it.
@@ -171,35 +182,19 @@ export function RegoEntry({ onRegistered, onOpenMenu }: RegoEntryProps) {
         </View>
 
         <View style={styles.inputGroup}>
-          <Animated.View style={[styles.field, underlineStyle]}>
-            <TextInput
-              value={draft}
-              onChangeText={setDraft}
-              onSubmitEditing={() => void lookUp(draft)}
-              placeholder="Rego number"
-              placeholderTextColor={Intake.mutedLabel}
-              autoCapitalize="characters"
-              autoCorrect={false}
-              returnKeyType="go"
-              accessibilityLabel="Registration number"
-              style={styles.input}
-            />
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Continue"
-              // Disabled is announced, not just greyed — the colour change is
-              // the affordance for people who can see it, this is for everyone.
-              accessibilityState={{ disabled: !filled || submitting }}
-              disabled={!filled || submitting}
-              onPress={() => void lookUp(draft)}
-              style={({ pressed }) => [styles.continue, { opacity: pressed ? 0.8 : 1 }]}
-            >
-              <Animated.View style={[StyleSheet.absoluteFill, styles.continueFill, buttonStyle]} />
-              <Animated.Text style={[styles.continueText, buttonTextStyle]}>
-                {submitting ? 'Looking up…' : 'Continue'}
-              </Animated.Text>
-            </Pressable>
-          </Animated.View>
+          <IntakeComposer
+            value={draft}
+            onChangeText={setDraft}
+            onSubmit={() => void lookUp(draft)}
+            placeholder="Enter the rego number, e.g. QMN16"
+            hint="Plate, VIN or photo"
+            onAttach={scanPlate}
+            attachLabel="Photograph or scan the plate"
+            onDictate={onDictate}
+            dictateActive={dictateActive}
+            dictateDisabled={dictateDisabled}
+            submitLabel="Continue"
+          />
 
           {error ? (
             <View style={styles.error}>
@@ -208,41 +203,39 @@ export function RegoEntry({ onRegistered, onOpenMenu }: RegoEntryProps) {
             </View>
           ) : null}
 
-          <View style={styles.recents}>
-            <ThemedText style={styles.recentsLabel}>Pick up where you left off</ThemedText>
-            <View style={styles.chipRow}>
-              {chips.map((vehicle) => (
-                <Pressable
-                  key={vehicle.rego}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Use ${vehicle.rego}, ${vehicle.make} ${vehicle.model}`}
-                  // Fills the field; submitting stays a deliberate second tap.
-                  onPress={() => setDraft(vehicle.rego)}
-                  style={({ pressed }) => [
-                    styles.chip,
-                    { borderColor: pressed ? Intake.accent : Intake.ruleChip },
-                  ]}
-                >
-                  <ThemedText style={styles.chipPlate}>{vehicle.rego}</ThemedText>
-                  <ThemedText style={styles.chipVehicle}>
-                    {vehicle.make} {vehicle.model}
-                  </ThemedText>
-                </Pressable>
-              ))}
+          <View>
+            <View style={styles.recentsLabel}>
+              <SectionLabel>Pick up where you left off</SectionLabel>
             </View>
+            {recents.map((vehicle) => (
+              <Pressable
+                key={vehicle.rego}
+                accessibilityRole="button"
+                accessibilityLabel={`Continue with ${vehicle.rego}, ${vehicle.make} ${vehicle.model}`}
+                // A recent goes straight through — the plate is already known,
+                // so asking the repairer to press send again buys nothing.
+                onPress={() => void lookUp(vehicle.rego)}
+                style={({ pressed }) => [styles.recentRow, { opacity: pressed ? 0.6 : 1 }]}
+              >
+                <ThemedText style={styles.recentPlate}>{vehicle.rego}</ThemedText>
+                <ThemedText style={styles.recentName}>
+                  {vehicle.make} {vehicle.model}
+                </ThemedText>
+                {vehicle.age ? (
+                  <ThemedText style={styles.recentAge}>{vehicle.age}</ThemedText>
+                ) : null}
+                <ThemedText style={styles.arrow}>→</ThemedText>
+              </Pressable>
+            ))}
           </View>
         </View>
       </ScrollView>
 
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Which vehicles can I assess?"
+      <FooterBar
+        label="Which vehicles can I assess?"
+        action="→"
         onPress={showAssessable}
-        style={({ pressed }) => [styles.footer, { opacity: pressed ? 0.6 : 1 }]}
-      >
-        <ThemedText style={styles.footerText}>Which vehicles can I assess?</ThemedText>
-        <ThemedText style={styles.footerArrow}>→</ThemedText>
-      </Pressable>
+      />
     </View>
   );
 }
@@ -274,28 +267,24 @@ const styles = StyleSheet.create({
   },
   menuBar: { width: 18, height: 1.5, backgroundColor: Intake.ink },
 
-  main: {
-    flexGrow: 1,
-    justifyContent: 'center',
-    gap: 30,
-    paddingHorizontal: Intake.gutter,
-    paddingVertical: 24,
-  },
+  main: { paddingTop: 76, paddingHorizontal: Intake.gutter, gap: 52, paddingBottom: 24 },
 
-  brandGroup: { gap: 20 },
+  brandGroup: { gap: 22 },
   wordmark: {
     fontFamily: Faces.headline,
-    fontSize: 34,
+    fontSize: 30,
     lineHeight: 44,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
     color: Intake.ink,
-    letterSpacing: -0.5,
   },
   copyGroup: { gap: 16 },
   headline: {
     fontFamily: Faces.headline,
-    fontSize: 40,
-    lineHeight: 42, // 1.05
-    letterSpacing: -0.6, // -.015em
+    fontSize: 42,
+    lineHeight: 43, // 1.02
+    letterSpacing: 0.21, // .005em
+    textTransform: 'uppercase',
     color: Intake.ink,
   },
   body: {
@@ -303,65 +292,41 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 22, // 1.55
     color: Intake.body,
-    maxWidth: 290,
+    maxWidth: 300,
   },
 
-  inputGroup: { gap: 22 },
-  field: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 14,
-    borderBottomWidth: 1.5,
-  },
-  input: {
-    flex: 1,
-    fontFamily: Faces.sansMedium,
-    fontSize: 17,
-    color: Intake.ink,
-    paddingBottom: 12,
-    ...NoFocusRing,
-  },
-  continue: {
-    borderRadius: 999,
-    paddingHorizontal: 20,
-    paddingVertical: 11,
-    marginBottom: 8,
-    overflow: 'hidden',
-    justifyContent: 'center',
-  },
-  continueFill: { borderRadius: 999 },
-  continueText: { fontFamily: Faces.sansMedium, fontSize: 13 },
+  inputGroup: { gap: 26 },
 
   error: { gap: 4 },
   errorTitle: { fontFamily: Faces.sansMedium, fontSize: 13, color: Intake.accent },
 
-  recents: { gap: 12 },
   recentsLabel: {
     fontFamily: Faces.sansMedium,
     fontSize: 10.5,
     letterSpacing: 1.68, // .16em
     textTransform: 'uppercase',
     color: Intake.mutedLabel,
+    marginBottom: 14,
   },
-  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: {
+  recentRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 7,
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 13,
-    paddingVertical: 9,
-    // The spec's 9px padding is under the 44pt touch minimum on its own.
-    minHeight: 40,
+    gap: 12,
+    paddingVertical: 16,
+    minHeight: TapTarget,
+    borderTopWidth: 1,
+    borderTopColor: Intake.ruleFooter,
   },
-  chipPlate: {
+  recentPlate: {
+    width: 64,
     fontFamily: Faces.plate,
-    fontSize: 12,
-    letterSpacing: 0.72, // .06em
+    fontSize: 12.5,
+    letterSpacing: 0.75, // .06em
     color: Intake.accent,
   },
-  chipVehicle: { fontFamily: Faces.sans, fontSize: 12.5, color: Intake.chipVehicle },
+  recentName: { flex: 1, fontFamily: Faces.sansMedium, fontSize: 14, color: Intake.ink },
+  recentAge: { fontFamily: Faces.sans, fontSize: 12, color: Intake.mutedLabel },
+  arrow: { fontSize: 15, color: Intake.accent },
 
   footer: {
     flexDirection: 'row',

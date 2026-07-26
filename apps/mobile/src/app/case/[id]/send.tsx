@@ -20,25 +20,29 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  TextInput,
   View,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { formatPrice } from '@partli/shared';
 
+import { IntakeComposer } from '@/components/intake-composer';
+import {
+  PageTitle,
+  PrimaryButton,
+  ScreenHeader,
+  SecondaryButton,
+  VehicleLine,
+} from '@/components/system/primitives';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Button, ErrorNotice, Loading } from '@/components/ui';
-import { NoFocusRing, Radius, Spacing, TapTarget } from '@/constants/theme';
+import { Faces, Intake } from '@/constants/theme';
 import { toErrorInfo, useAsyncData } from '@/hooks/use-async-data';
-import { useTheme } from '@/hooks/use-theme';
 import { backend } from '@/lib/backend';
 
 export default function SendToCustomerScreen() {
   const { id: caseId } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const theme = useTheme();
 
   // Sending on mount is the point of this screen — there is nothing to configure.
   const quote = useAsyncData(() => backend.sendToCustomer(caseId), [caseId]);
@@ -129,7 +133,7 @@ export default function SendToCustomerScreen() {
 
   if (quote.loading) {
     return (
-      <ThemedView style={styles.container}>
+      <ThemedView style={styles.page}>
       <Stack.Screen options={{ title: vehicleTitle, headerTitleAlign: 'center' }} />
         <Loading label="Building the quote…" />
       </ThemedView>
@@ -139,7 +143,7 @@ export default function SendToCustomerScreen() {
   if (!quote.data) {
     const error = actionError ?? quote.error;
     return (
-      <ThemedView style={styles.container}>
+      <ThemedView style={styles.page}>
       <Stack.Screen options={{ title: vehicleTitle, headerTitleAlign: 'center' }} />
         <View style={styles.padded}>
           {error ? <ErrorNotice title={error.title} detail={error.detail} /> : null}
@@ -154,207 +158,138 @@ export default function SendToCustomerScreen() {
   const result = quote.data;
   const error = actionError ?? quote.error;
 
+  const emailValid = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim());
+
   return (
-    <ThemedView style={styles.container}>
-      <Stack.Screen options={{ title: vehicleTitle, headerTitleAlign: 'center' }} />
-      <ScrollView contentContainerStyle={styles.list}>
+    <ThemedView style={styles.page}>
+      <Stack.Screen options={{ headerShown: false }} />
+
+      <ScreenHeader onBack={() => router.back()} backLabel="Back to the assessment">
+        <VehicleLine name={vehicleTitle} plate={vehicle?.rego} />
+      </ScreenHeader>
+
+      <ScrollView contentContainerStyle={styles.main} keyboardShouldPersistTaps="handled">
+        <View style={styles.titleGroup}>
+          <PageTitle size={40}>Send to the customer</PageTitle>
+          <ThemedText style={styles.body}>
+            Email them the link and they can approve from their own phone.
+          </ThemedText>
+        </View>
+
         {error ? <ErrorNotice title={error.title} detail={error.detail} /> : null}
 
-        <ThemedText type="heading" style={styles.heading}>
-          Send to the customer
-        </ThemedText>
-        <ThemedText type="small" themeColor="textSecondary" style={styles.sub}>
-          Email them the link and they can approve from their own phone.
-        </ThemedText>
+        <IntakeComposer
+          value={email}
+          onChangeText={setEmail}
+          onSubmit={emailLink}
+          placeholder="customer@email.com"
+          hint="Opens your mail app with the message written"
+          onAttach={() => setShowParts((open) => !open)}
+          attachLabel={showParts ? 'Hide the parts' : 'See the parts'}
+          // An address that cannot receive the link is not a send.
+          canSend={emailValid}
+          submitLabel="Email the link"
+        />
 
-        {/* Email is the whole screen now. The QR only ever helped a customer standing at
-            the counter, and the link works everywhere. */}
-        <View style={styles.emailRow}>
-          <TextInput
-            value={email}
-            onChangeText={setEmail}
-            placeholder="customer@email.com"
-            placeholderTextColor={theme.textSecondary}
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="email-address"
-            inputMode="email"
-            onSubmitEditing={emailLink}
-            returnKeyType="send"
-            style={[
-              styles.emailInput,
-              {
-                color: theme.text,
-                borderColor: theme.border,
-                backgroundColor: theme.backgroundElement,
-              },
-              NoFocusRing,
-            ]}
-          />
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Email the link to the customer"
-            onPress={emailLink}
-            disabled={!email.trim()}
-            style={({ pressed }) => [
-              styles.emailSend,
-              {
-                backgroundColor: email.trim() ? theme.accent : theme.backgroundSelected,
-                opacity: pressed ? 0.8 : 1,
-              },
-            ]}
-          >
-            <Ionicons
-              name="arrow-forward"
-              size={20}
-              color={email.trim() ? theme.accentText : theme.textSecondary}
-            />
-          </Pressable>
-        </View>
-        <ThemedText type="small" themeColor="textSecondary" style={styles.emailNote}>
-          Opens your mail app with the message written, so it comes from the shop&apos;s
-          address.
-        </ThemedText>
-
-        {/* One line instead of 66 rows. */}
-        <View style={[styles.summary, { borderTopColor: theme.border, borderBottomColor: theme.border }]}>
-          <View style={styles.summaryRow}>
-            <View style={styles.summaryLeft}>
-              <ThemedText type="rowTitle">{result.lines.length} parts</ThemedText>
-              <ThemedText type="small" themeColor="textSecondary">
-                Comprehensive assessment
-              </ThemedText>
+        <View style={styles.quote}>
+          <View style={styles.quoteHead}>
+            <View style={styles.quoteLeft}>
+              <PageTitle size={22}>{`${result.lines.length} parts`}</PageTitle>
+              <ThemedText style={styles.quoteMeta}>Comprehensive assessment</ThemedText>
             </View>
-            {/* Labelled a range, because it is one — three plans priced per part,
-                not a number the shop is committing to. */}
-            <View style={styles.summaryRight}>
-              <ThemedText type="rowTitle" style={styles.summaryPrice}>
+            <View style={styles.quoteRight}>
+              <ThemedText style={styles.price}>
                 {formatPrice(range.low)}
-                {range.high > range.low ? ` – ${formatPrice(range.high)}` : ''}
+                {range.high > range.low ? `–${formatPrice(range.high)}` : ''}
               </ThemedText>
-              <ThemedText type="label" style={{ color: theme.textSecondary }}>
-                ESTIMATED RANGE
-              </ThemedText>
+              <ThemedText style={styles.priceLabel}>Estimated range</ThemedText>
             </View>
           </View>
-          <ThemedText type="small" themeColor="textSecondary">
+
+          <ThemedText style={styles.quoteBody}>
             The customer picks from three plans: best price, our recommendation, or all
             genuine parts.
           </ThemedText>
-        </View>
 
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => setShowParts((open) => !open)}
-          style={({ pressed }) => [styles.disclosure, { opacity: pressed ? 0.6 : 1 }]}
-        >
-          <ThemedText type="smallBold" style={{ color: theme.accent }}>
-            {showParts ? 'Hide the parts' : 'See the parts'}
-          </ThemedText>
-        </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={showParts ? 'Hide the parts' : 'See the parts'}
+            onPress={() => setShowParts((open) => !open)}
+            hitSlop={10}
+            style={({ pressed }) => [styles.seeParts, { opacity: pressed ? 0.6 : 1 }]}
+          >
+            <ThemedText style={styles.seePartsText}>
+              {showParts ? 'Hide the parts ←' : 'See the parts →'}
+            </ThemedText>
+          </Pressable>
 
-        {showParts
-          ? result.lines.map((item) => (
-              <View key={item.part_id} style={[styles.partRow, { borderBottomColor: theme.border }]}>
-                <ThemedText type="small" style={styles.partName} numberOfLines={2}>
-                  {item.qty > 1 ? `${item.qty}× ` : ''}
-                  {item.display_name}
-                </ThemedText>
-                <ThemedText type="small" themeColor="textSecondary">
-                  {item.options.length
-                    ? formatPrice(Math.min(...item.options.map((o) => o.price_nzd)) * item.qty)
-                    : '—'}
-                </ThemedText>
-              </View>
-            ))
-          : null}
-
-        <View style={styles.actions}>
-          <Button title="Back to the assessment" onPress={() => router.back()} fullWidth />
-          {/* Re-prices the quote against the current report and reissues the same link.
-              Named for what it does: the old "Rebuild quote" read like it might discard
-              something. */}
-          <Button
-            title="Update the quote"
-            variant="secondary"
-            onPress={resend}
-            loading={resending}
-            fullWidth
-          />
-          <ThemedText type="small" themeColor="textSecondary" style={styles.footnote}>
-            Re-prices against any parts you have confirmed since. The link stays the same.
-          </ThemedText>
+          {showParts
+            ? result.lines.map((item) => (
+                <View key={item.part_id} style={styles.partRow}>
+                  <ThemedText style={styles.partName} numberOfLines={1}>
+                    {item.display_name}
+                    {item.qty > 1 ? ` ×${item.qty}` : ''}
+                  </ThemedText>
+                  <ThemedText style={styles.partPrice}>
+                    {item.options.length
+                      ? formatPrice(Math.min(...item.options.map((o) => o.price_nzd)) * item.qty)
+                      : ''}
+                  </ThemedText>
+                </View>
+              ))
+            : null}
         </View>
       </ScrollView>
+
+      <View style={styles.actions}>
+        <PrimaryButton title="Back to the assessment" onPress={() => router.back()} />
+        <SecondaryButton title="Update the quote" onPress={resend} disabled={resending} />
+        <ThemedText style={styles.note}>
+          Re-prices against any parts you&rsquo;ve confirmed since. The link stays the same.
+        </ThemedText>
+      </View>
     </ThemedView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  padded: { padding: Spacing.three },
-  retry: { marginTop: Spacing.three },
-  list: {
-    padding: Spacing.three,
-    gap: Spacing.three,
-    paddingBottom: Spacing.five,
-    maxWidth: 520,
-    width: '100%',
-    alignSelf: 'center',
+  page: { flex: 1, backgroundColor: Intake.page },
+  padded: { padding: Intake.gutter },
+  retry: { marginTop: 16 },
+
+  main: { paddingTop: 52, paddingHorizontal: Intake.gutter, gap: 34, paddingBottom: 24 },
+  titleGroup: { gap: 14 },
+  body: { fontFamily: Faces.sans, fontSize: 14, lineHeight: 22, color: Intake.body, maxWidth: 300 },
+
+  quote: { gap: 14, borderTopWidth: 1, borderTopColor: Intake.ruleFooter, paddingTop: 18 },
+  quoteHead: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 },
+  quoteLeft: { flexShrink: 1, gap: 3 },
+  quoteRight: { alignItems: 'flex-end', gap: 3 },
+  quoteMeta: { fontFamily: Faces.sans, fontSize: 12.5, color: Intake.mutedLabel },
+  price: { fontFamily: Faces.plate, fontSize: 17, color: Intake.ink },
+  priceLabel: {
+    fontFamily: Faces.sansMedium,
+    fontSize: 9.5,
+    letterSpacing: 1.33, // .14em
+    textTransform: 'uppercase',
+    color: Intake.mutedLabel,
   },
+  quoteBody: { fontFamily: Faces.sans, fontSize: 13, lineHeight: 19.5, color: Intake.body },
+  seeParts: { minHeight: 44, justifyContent: 'center' },
+  seePartsText: { fontFamily: Faces.sansMedium, fontSize: 13, color: Intake.accent },
 
-  heading: { textAlign: 'center' },
-  sub: { textAlign: 'center', marginTop: -Spacing.two },
-
-
-  linkWrap: { alignItems: 'center' },
-  link: { textAlign: 'center' },
-
-  emailRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
-  emailInput: {
-    flex: 1,
-    fontSize: 16,
-    minHeight: TapTarget - 8,
-    paddingHorizontal: Spacing.three,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: Radius.round,
-  },
-  emailSend: {
-    width: TapTarget - 8,
-    height: TapTarget - 8,
-    borderRadius: Radius.round,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  emailNote: { textAlign: 'center', marginTop: -Spacing.two },
-
-  summary: {
-    gap: Spacing.one,
-    paddingVertical: Spacing.three,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  summaryLeft: { flexShrink: 1, gap: 2 },
-  summaryRight: { alignItems: 'flex-end', flexShrink: 1, gap: 2 },
-  summaryPrice: { textAlign: 'right' },
-  summaryRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: Spacing.three,
-  },
-
-  disclosure: { alignSelf: 'center', minHeight: 30, justifyContent: 'center' },
   partRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: Spacing.two,
-    paddingVertical: Spacing.two,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    gap: 12,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: Intake.ruleFooter,
   },
-  partName: { flex: 1 },
+  partName: { flex: 1, fontFamily: Faces.sans, fontSize: 13, color: Intake.ink },
+  partPrice: { fontFamily: Faces.plate, fontSize: 12.5, color: Intake.body },
 
-  actions: { gap: Spacing.two, marginTop: Spacing.two },
-  footnote: { textAlign: 'center' },
+  actions: { paddingHorizontal: Intake.gutter, paddingBottom: 24, gap: 10 },
+  note: { fontFamily: Faces.sans, fontSize: 12, lineHeight: 17.4, color: Intake.mutedLabel },
 });

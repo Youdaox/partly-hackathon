@@ -1,9 +1,17 @@
 import { DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { DMSans_400Regular, DMSans_500Medium } from '@expo-google-fonts/dm-sans';
+import {
+  DMSans_400Regular,
+  DMSans_500Medium,
+  DMSans_600SemiBold,
+} from '@expo-google-fonts/dm-sans';
 import { IBMPlexMono_500Medium } from '@expo-google-fonts/ibm-plex-mono';
-import { Newsreader_400Regular, useFonts } from '@expo-google-fonts/newsreader';
+import {
+  Oswald_400Regular,
+  Oswald_600SemiBold,
+  useFonts,
+} from '@expo-google-fonts/oswald';
 
 import { Colors } from '@/constants/theme';
 import '@/global.css';
@@ -25,15 +33,16 @@ const navigationTheme = {
 };
 
 export default function RootLayout() {
-  // Newsreader carries the headline, DM Sans every piece of UI text, IBM Plex
-  // Mono the registration plates. Loaded here rather than per-screen so the
-  // first paint anywhere already has them and nothing reflows. No italic: both
-  // headlines are set upright in one colour, so shipping the face would be a
-  // download nothing renders.
+  // Oswald carries the headlines — uppercase, condensed, one weight. DM Sans
+  // every other piece of UI text, IBM Plex Mono the registration plates.
+  // Loaded here rather than per-screen so the first paint anywhere already has
+  // them and nothing reflows.
   const [fontsLoaded] = useFonts({
-    Newsreader_400Regular,
+    Oswald_400Regular,
+    Oswald_600SemiBold,
     DMSans_400Regular,
     DMSans_500Medium,
+    DMSans_600SemiBold,
     IBMPlexMono_500Medium,
   });
 

@@ -103,26 +103,61 @@ export const Fonts = Platform.select({
  */
 export const Intake = {
   accent: '#4B47FF',
+  accentHover: '#3A37D6',
+  /** The pale accent family: inactive tab fill, its border, its text. */
+  accentPale: '#ECEBFF',
+  accentPaleBorder: '#DEDCFF',
+  accentPaleText: '#3B38C9',
+  /** Answer chips on the question card. */
+  answerChipBorder: '#C9C7FF',
+
   ink: '#15141A',
   body: '#6F6D6A',
   mutedLabel: '#B0AEAA',
-  /** Footer rule, idle input underline, chip border — three different weights. */
+  secondary: '#8D8A84',
+
+  /** Region rules; chip and field borders. */
   ruleFooter: '#F0EEEA',
   ruleInput: '#DCDAD6',
   ruleChip: '#E8E6E2',
+
+  /** Cards and the composer sit a shade off the page so their edge reads. */
+  surface: '#FBFBFA',
+  composer: '#FBFBFA',
+  chipFill: '#F6F5F2',
+  page: '#FFFFFF',
+
+  /** The 3D panel, and the two things it marks. */
+  panel: '#15141A',
+  markerVisible: '#EF6B52',
+  markerPredicted: '#8A86FF',
+
+  success: '#1F9D63',
   buttonIdle: '#F2F1EE',
   buttonIdleText: '#ADABA7',
-  chipVehicle: '#3A383F',
-  page: '#FFFFFF',
-  /** 22px either side, everywhere on the screen. */
+
+  /** 22px either side, on every screen. */
   gutter: 22,
+} as const;
+
+/** Corner radii, by what they belong to. */
+export const Round = {
+  pill: 999,
+  composer: 16,
+  media: 14,
+  card: 12,
+  tab: 10,
+  answerChip: 9,
 } as const;
 
 /** The three faces, by the names `useFonts` registered them under. */
 export const Faces = {
-  headline: 'Newsreader_400Regular',
+  headline: 'Oswald_600SemiBold',
+  /** Oswald 400 — the large confidence numeral on a part card. */
+  headlineLight: 'Oswald_400Regular',
   sans: 'DMSans_400Regular',
   sansMedium: 'DMSans_500Medium',
+  sansSemi: 'DMSans_600SemiBold',
   plate: 'IBMPlexMono_500Medium',
 } as const;
 
