@@ -147,12 +147,26 @@ export function PartCard({
 }: PartCardProps) {
   const delta = changedFrom != null && p != null ? Math.round((p - changedFrom) * 100) : null;
 
+  // The whole card selects the part, but it must NOT be a `button`.
+  //
+  // It was one, and that broke every control inside it: `accessibilityRole="button"` makes
+  // react-native-web emit a real <button>, the confirm/dismiss/diagram controls are buttons
+  // too, and a <button> inside a <button> is invalid HTML — the browser drops the inner
+  // clicks. Without the role it renders a <div>, so those stay valid and keep working, and
+  // React Native's responder system gives an inner press to the inner control rather than
+  // firing both.
+  const Shell = onPress ? Pressable : View;
+
   return (
-    // Deliberately not pressable. Making the whole card the hit target turned it into a
-    // <button> on web, and the confirm/dismiss/diagram controls inside it are buttons too —
-    // nested buttons are invalid HTML and the inner ones stop firing. Selection is its own
-    // control below instead, which also stops a tap on "Confirm damage" doing two things.
-    <View
+    <Shell
+      {...(onPress
+        ? {
+            accessibilityLabel: selected
+              ? `${name}, shown on the model`
+              : `${name}, tap to show on the model`,
+            onPress,
+          }
+        : {})}
       style={[
         styles.card,
         moved ? { backgroundColor: Intake.accentPale, borderColor: Intake.accentPaleBorder } : null,
@@ -197,9 +211,9 @@ export function PartCard({
         {/* Where it moved from, and by how much. */}
         {delta != null && delta !== 0 ? (
           <ThemedText style={styles.delta}>
-            {`was ${Math.round((changedFrom ?? 0) * 100)}%  ${delta > 0 ? '↑' : '↓'} ${
-              delta > 0 ? '+' : ''
-            }${delta} points`}
+            {`${Math.round((changedFrom ?? 0) * 100)}%  →  ${Math.round(
+              (p ?? 0) * 100,
+            )}%   ${delta > 0 ? '+' : ''}${delta}`}
           </ThemedText>
         ) : null}
 
@@ -207,22 +221,6 @@ export function PartCard({
           <>
             <ThemedText style={styles.cardMeta}>Confirmed at the car</ThemedText>
             <ThemedText style={styles.verified}>✓ verified</ThemedText>
-            {onPress ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityState={{ selected: !!selected }}
-                accessibilityLabel={
-                  selected ? `Hide ${name} on the model` : `Show ${name} on the model`
-                }
-                onPress={onPress}
-                hitSlop={10}
-                style={({ pressed }) => [styles.confirmLink, { opacity: pressed ? 0.6 : 1 }]}
-              >
-                <ThemedText style={styles.confirmText}>
-                  {selected ? 'Hide on model' : 'Show on model'}
-                </ThemedText>
-              </Pressable>
-            ) : null}
           </>
         ) : (
           <>
@@ -262,22 +260,6 @@ export function PartCard({
                   ]}
                 >
                   <ThemedText style={styles.dismissText}>Not damaged</ThemedText>
-                </Pressable>
-              ) : null}
-              {onPress ? (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: !!selected }}
-                  accessibilityLabel={
-                    selected ? `Hide ${name} on the model` : `Show ${name} on the model`
-                  }
-                  onPress={onPress}
-                  hitSlop={10}
-                  style={({ pressed }) => [styles.confirmLink, { opacity: pressed ? 0.6 : 1 }]}
-                >
-                  <ThemedText style={styles.dismissText}>
-                    {selected ? 'Hide on model' : 'Show on model'}
-                  </ThemedText>
                 </Pressable>
               ) : null}
             </View>
@@ -321,7 +303,7 @@ export function PartCard({
           </>
         ) : null}
       </View>
-    </View>
+    </Shell>
   );
 }
 
@@ -426,7 +408,17 @@ const styles = StyleSheet.create({
   newBadgeText: { fontFamily: Faces.sansMedium, fontSize: 9.5, letterSpacing: 0.6, color: '#FFFFFF' },
   // The one place a number is allowed next to the headline number: it says what that
   // headline used to be.
-  delta: { fontFamily: Faces.sansMedium, fontSize: 12, color: Intake.accentPaleText },
+  delta: {
+    fontFamily: Faces.sansMedium,
+    fontSize: 12.5,
+    color: Intake.accentPaleText,
+    backgroundColor: '#FFFFFF',
+    borderRadius: Round.answerChip,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    alignSelf: 'flex-start',
+    overflow: 'hidden',
+  },
   confirmLink: { minHeight: 28, maxWidth: 160, justifyContent: 'center' },
   confirmText: { fontFamily: Faces.sansMedium, fontSize: 12.5, color: Intake.accent },
   // Both actions on one line; the accent stays on the one that adds to the order, so
