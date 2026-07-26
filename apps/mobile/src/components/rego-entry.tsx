@@ -18,6 +18,7 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Image } from 'expo-image';
 
 import { IntakeComposer } from '@/components/intake-composer';
 import {
@@ -165,9 +166,15 @@ export function RegoEntry({
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.brandGroup}>
-          {/* No wordmark asset ships yet, so it is set rather than drawn — the
-              headline face at the mark's size. Swap for an SVG when one lands. */}
-          <ThemedText style={styles.wordmark}>Partli</ThemedText>
+          {/* The real mark, not the headline face standing in for it. Transparent PNG so
+              it sits on the page without a white card behind it; width-driven with the
+              source's own 403×156 ratio locked so it can never distort. */}
+          <Image
+            source={require('@/assets/images/partli-wordmark.png')}
+            style={styles.wordmark}
+            contentFit="contain"
+            accessibilityLabel="Partli"
+          />
 
           <View style={styles.copyGroup}>
             {/* One upright weight, one colour. The intake screen sets its
@@ -270,13 +277,11 @@ const styles = StyleSheet.create({
   main: { paddingTop: 76, paddingHorizontal: Intake.gutter, gap: 52, paddingBottom: 24 },
 
   brandGroup: { gap: 22 },
+  // 403×156 source. Sized to roughly the cap height the set wordmark occupied, so the
+  // rest of the hero's rhythm is unchanged.
   wordmark: {
-    fontFamily: Faces.headline,
-    fontSize: 30,
-    lineHeight: 44,
-    letterSpacing: 1,
-    textTransform: 'uppercase',
-    color: Intake.ink,
+    width: 150,
+    aspectRatio: 403 / 156,
   },
   copyGroup: { gap: 16 },
   headline: {
