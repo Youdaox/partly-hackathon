@@ -171,8 +171,8 @@ export default function SendToCustomerScreen() {
       <ScrollView contentContainerStyle={styles.main} keyboardShouldPersistTaps="handled">
         <View style={styles.titleGroup}>
           <PageTitle size={40} style={styles.centredText}>Send to the customer</PageTitle>
-          <ThemedText style={styles.body}>
-            Email them the link and they can approve from their own phone.
+          <ThemedText style={[styles.subtitle, styles.centredText]}>
+            Email the link — they approve on their own phone.
           </ThemedText>
         </View>
 
@@ -261,7 +261,8 @@ const styles = StyleSheet.create({
   titleGroup: { gap: 14, alignItems: 'center' },
   // Width-capped copy needs the block centred as well as the text.
   centredText: { textAlign: 'center', alignSelf: 'center' },
-  body: { fontFamily: Faces.sans, fontSize: 14, lineHeight: 22, color: Intake.body, maxWidth: 300 },
+  // Uncapped: the cap on `body` is what forced this onto two lines.
+  subtitle: { fontFamily: Faces.sans, fontSize: 14, lineHeight: 22, color: Intake.body },
 
   quote: { gap: 14, borderTopWidth: 1, borderTopColor: Intake.ruleFooter, paddingTop: 18 },
   quoteHead: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 },

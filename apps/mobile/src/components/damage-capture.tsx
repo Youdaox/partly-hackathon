@@ -378,7 +378,7 @@ export function DamageCapture({
           <PageTitle size={40} style={styles.centred}>
               Add the damage to start the analysis.
             </PageTitle>
-          <ThemedText style={styles.body}>
+          <ThemedText style={[styles.body, styles.centred]}>
             Photos read best, but a sentence about what happened is enough to begin.
           </ThemedText>
         </View>
